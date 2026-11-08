@@ -1495,7 +1495,7 @@ export const DEFAULT_STAMM = {
     "Waldstück abgesucht",
     "Suche mit der Drohne",
     "Polizeihubschrauber unterstützte die Suche",
-    "Rettungshundestaffel im Einsatz",
+    "Die Rettungshundestaffel war im Einsatz",
     "Person nach [55] Minuten gefunden",
     "Person wohlbehalten aufgefunden",
     "## Sonstiges",

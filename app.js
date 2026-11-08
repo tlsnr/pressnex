@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261108-2155";
+import { DEFAULT_STAMM } from "./data.js?v=20261108-2215";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -45,7 +45,7 @@ Aufbau und Stil (orientiert an den bisherigen Berichten der Pressesprecher):
 - Schluss sachlich, z. B. "Nach rund zwei Stunden konnte der Einsatz beendet werden." – nur mit vorhandenen Angaben, sonst "Anschließend konnte der Einsatz beendet werden."
 - Rettungsdienst und Polizei kurz erwähnen, wenn angegeben; Rettungshubschrauber mit Namen.
 - Sachlich, ruhig, gut lesbar, abwechslungsreich. Keine Hashtags, keine Emojis, keine Unterschrift.
-- Länge: 600 bis 1.500 Zeichen, niemals mehr als 2.000 Zeichen.`,
+- Länge: 1.850 bis 2.100 Zeichen, niemals mehr als 2.200 Zeichen.`,
   beispiele: `Am Sonntagabend wurden wir um 19:50 Uhr mit dem Einsatzstichwort „F2_Fahrzeug“ in den Stadtteil Laxten auf den Parkplatz eines Verbrauchermarktes alarmiert.
 
 Beim Eintreffen an der Einsatzstelle bestätigte sich die gemeldete Lage. Ein PKW brannte, eine starke Rauchentwicklung war sichtbar. Umgehend wurde die Brandbekämpfung eingeleitet. Ein Trupp unter Atemschutz ging mit einem C-Rohr zur Brandbekämpfung vor, wodurch eine weitere Ausbreitung des Feuers verhindert werden konnte. Im weiteren Einsatzverlauf wurde zusätzlich Netzmittel eingesetzt.
@@ -120,7 +120,7 @@ function newForm() {
     uhrzeit: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     code: "", klartext: "", ort: "", adresse: "", besonderheiten: "",
     code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false,
-    beteiligte: [], ausschreiben: false
+    beteiligte: [], ausschreiben: false, fzNennen: false
   };
 }
 
@@ -130,7 +130,8 @@ const ERH_GRUENDE = [
   "Lageerkundung durch ersteintreffende Kräfte",
   "Rückmeldung eines bereits eingetroffenen Rettungswagens",
   "Rückmeldung der Polizei vor Ort",
-  "Vermisste Personen",
+  "Vermisste Person",
+  "Mehrere vermisste Personen",
   "Großes Suchgebiet",
   "Höherer Kräfteansatz für die Personensuche erforderlich",
   "Hilflose oder orientierungslose Person",
@@ -447,7 +448,7 @@ function viewNeu(main) {
 
   const body4 = `${bausteinPanel(f)}
     <textarea id="lage" data-bind="besonderheiten" rows="6" placeholder="Stichpunkte antippen oder selbst schreiben – die KI erfindet nichts dazu.">${esc(f.besonderheiten)}</textarea>
-    <label class="check"><input type="checkbox" data-bind="ausschreiben" ${f.ausschreiben ? "checked" : ""}> Genaue Fahrzeugbezeichnungen (z. B. „HLF 20“)</label>`;
+    <label class="check"><input type="checkbox" data-bind="fzNennen" ${f.fzNennen ? "checked" : ""}> Fahrzeuge im Bericht erwähnen <span class="hint inline">(sonst nur die Feuerwehren)</span></label>`;
 
   main.innerHTML = `<div class="stack neu">
     ${S.editId ? `<div class="notice info row" style="justify-content:space-between;align-items:center"><span><b>Bericht bearbeiten</b></span><button class="btn" data-act="canceledit">Abbrechen</button></div>` : ""}
@@ -623,12 +624,37 @@ function sortiereLage(txt) {
   const rows = txt.split("\n").filter(x => x.trim()).map((line, n) => { let i = idx(line); if (i < 0) i = last; last = i; return { line, i, n }; });
   return rows.sort((a, b) => a.i - b.i || a.n - b.n).map(r => r.line).join("\n");
 }
+// Sonnenauf-/untergang für Lingen (Ems) – vereinfachter NOAA-Algorithmus, Ergebnis in deutscher Ortszeit
+function sonne(iso) {
+  const [y, m, d] = iso.split("-").map(Number), lat = 52.523, lon = 7.317, rad = Math.PI / 180;
+  const N = Math.floor((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 0)) / 864e5);
+  const calc = auf => {
+    const t = N + ((auf ? 6 : 18) - lon / 15) / 24, M = 0.9856 * t - 3.289;
+    let L = (M + 1.916 * Math.sin(M * rad) + 0.020 * Math.sin(2 * M * rad) + 282.634) % 360;
+    let RA = Math.atan(0.91764 * Math.tan(L * rad)) / rad; RA = (RA + 360) % 360;
+    RA = (RA + (Math.floor(L / 90) * 90 - Math.floor(RA / 90) * 90)) / 15;
+    const sinD = 0.39782 * Math.sin(L * rad), cosD = Math.cos(Math.asin(sinD));
+    const cosH = (Math.cos(90.833 * rad) - sinD * Math.sin(lat * rad)) / (cosD * Math.cos(lat * rad));
+    let H = Math.acos(cosH) / rad; H = (auf ? 360 - H : H) / 15;
+    const UT = ((H + RA - 0.06571 * t - 6.622 - lon / 15) % 24 + 24) % 24;
+    const dt = new Date(Date.UTC(y, m - 1, d, 0, 0) + UT * 3600e3);
+    return dt.toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" });
+  };
+  try { return { auf: calc(true), unter: calc(false) }; } catch { return null; }
+}
+const minuten = hhmm => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
 function buildPrompt(f) {
   const d = ableiten(f), st = aaoByCode(f.code);
   const lines = [];
   lines.push("EINSATZDATEN");
   lines.push(`- Datum: ${weekday(f.datum)}, ${deDate(f.datum)}`);
   lines.push(`- Alarmierung: ${f.uhrzeit} Uhr, also ${tagesPhrase(f.datum, f.uhrzeit)}`);
+  const so = sonne(f.datum);
+  if (so) {
+    const a = minuten(f.uhrzeit), u = minuten(so.unter), sa = minuten(so.auf);
+    const licht = a >= sa + 30 && a <= u - 30 ? "es war hell" : a > u - 30 && a <= u + 45 ? "die Dunkelheit brach gerade herein" : a > sa - 45 && a < sa + 30 ? "es dämmerte gerade" : "es war bereits dunkel";
+    lines.push(`- Lichtverhältnisse in Lingen: Sonnenuntergang ${so.unter} Uhr, Sonnenaufgang ${so.auf} Uhr → zur Alarmzeit: ${licht}. „Einbruch der Dunkelheit“ nur verwenden, wenn die Dunkelheit gerade hereinbrach; sonst „aufgrund der Dunkelheit“ bzw. bei Helligkeit gar nicht erwähnen.`);
+  }
   lines.push(`- AAO-Einsatzstichwort (Grundstichwort der Alarmierung): ${f.code}`);
   if (f.code2) {
     const st2 = aaoByCode(f.code2);
@@ -643,10 +669,15 @@ function buildPrompt(f) {
   lines.push(`- Einsatzart: ${st?.art || "unbekannt"}`);
   lines.push(f.ort.trim() ? `- Einsatzort (nur diesen Ort nennen): ${f.ort.trim()}` : "- Einsatzort: nicht angegeben – keinen Ort nennen");
   lines.push(`- Einsatzführende Feuerwehr: ${d.lead.name}`);
-  const angefordert = f.beteiligte.filter(b => !b.lead && isLingen(b.name) && b.fz.length).map(b => b.name);
-  lines.push(d.eigen
-    ? `- Perspektive: Einsatz der ${d.lead.name} (Ortsfeuerwehr der Freiwilligen Feuerwehr Lingen).` + (angefordert.length ? ` Zur Unterstützung kamen: ${angefordert.join(", ")}.` : "")
-    : `- Perspektive: Unterstützungseinsatz außerhalb Lingens. Kräfte der Feuerwehr Lingen wurden zur Unterstützung der ${d.lead.name} alarmiert. Aus Sicht der Lingener Kräfte schreiben.`);
+  const WIR = "Feuerwehr Lingen";
+  const wirDabei = f.beteiligte.some(b => b.name === WIR);
+  const andereLingen = f.beteiligte.filter(b => !b.lead && isLingen(b.name) && b.name !== WIR).map(b => b.name);
+  if (d.lead.name === WIR)
+    lines.push(`- Perspektive: „Wir“ = Feuerwehr Lingen, wir führten den Einsatz.${andereLingen.length ? " Mitalarmiert/unterstützend: " + andereLingen.join(", ") + " (gehören in den ersten Satz: „… wurden wir gemeinsam mit der … alarmiert“)." : ""}`);
+  else if (wirDabei)
+    lines.push(`- Perspektive: „Wir“ = Feuerwehr Lingen. Die ${d.lead.name} führte den Einsatz, WIR unterstützten SIE. Formulierung z. B.: „… wurden wir zur Unterstützung der ${d.lead.name} … alarmiert.“ bzw. „Wir unterstützten die ${d.lead.name} bei diesem Einsatz.“ NIEMALS schreiben, dass die Feuerwehr Lingen „uns“ unterstützte.`);
+  else
+    lines.push(`- Perspektive: Die Feuerwehr Lingen selbst war nicht beteiligt. In der dritten Person über die ${d.lead.name} schreiben („Die ${d.lead.name} wurde … alarmiert“), kein „wir“.`);
   lines.push("- Beteiligte Kräfte (Fahrzeuge NUR wo ausdrücklich erlaubt nennen):");
   let gesamt = 0;
   const unterstFw = f.beteiligte.filter(b => !b.lead && /feuerwehr/i.test(b.name));
@@ -656,21 +687,27 @@ function buildPrompt(f) {
     gesamt += b.fz.length;
     const sonder = b.fz.filter(fzSonder);
     let fz;
-    if (b.lead) fz = sonder.length ? `Fahrzeuge nicht aufzählen; nur falls es zur Lage passt, darf erwähnt werden: mit ${fzGruppe(sonder, f.ausschreiben)}` : "Fahrzeuge nicht nennen";
+    if (!f.fzNennen) fz = "KEINE Fahrzeuge nennen";
+    else if (b.lead) fz = sonder.length ? `Fahrzeuge nicht aufzählen; nur falls es zur Lage passt, darf erwähnt werden: mit ${fzGruppe(sonder, false)}` : "Fahrzeuge nicht nennen";
     else if (!b.fz.length) fz = "ohne Fahrzeugangabe";
-    else if (istFw && unterstFw.length === 1 && b.fz.length === 1) fz = "darf genannt werden: mit " + fzGruppe(b.fz, f.ausschreiben);
-    else if (sonder.length) fz = "nur dieses Sonderfahrzeug nennen: mit " + fzGruppe(sonder, f.ausschreiben);
+    else if (istFw && unterstFw.length === 1 && b.fz.length === 1) fz = "darf genannt werden: mit " + fzGruppe(b.fz, false);
+    else if (sonder.length) fz = "nur dieses Sonderfahrzeug nennen: mit " + fzGruppe(sonder, false);
     else fz = "Fahrzeuge nicht nennen";
     lines.push(`  - ${b.name} (${rolle}): ${fz}`);
   }
   const wehren = f.beteiligte.filter(b => /feuerwehr/i.test(b.name)).length;
   if (gesamt >= 10 || wehren >= 4) lines.push(`- Insgesamt waren ${gesamt} Fahrzeuge im Einsatz (darf so genannt werden).`);
-  if (d.anfo.length) lines.push(`- Anforderung laut AAO: ${d.anfo.join(", ")}`);
+  if (d.anfo.length && f.fzNennen) lines.push(`- Anforderung laut AAO: ${d.anfo.join(", ")}`);
   if (f.besonderheiten.trim()) lines.push(`- Lagebeschreibung (Stichpunkte in dieser Reihenfolge, als flüssigen Fließtext formulieren, nicht wörtlich übernehmen):\n${sortiereLage(f.besonderheiten.trim())}`);
-  lines.push(f.ausschreiben
-    ? "- Fahrzeugschreibweise: genaue Bezeichnungen wie oben (z. B. „mit dem HLF 20“)."
-    : "- Fahrzeugschreibweise: allgemeinverständlich wie oben (z. B. „mit einem Löschfahrzeug“, „mit zwei Löschfahrzeugen“, „mit der Drehleiter“). Keine Kürzel.");
-  let p = `${S.ki.stil}\n\n${HARD_RULES}\n\n${lines.join("\n")}`;
+  lines.push(f.fzNennen
+    ? "- Fahrzeuge: nur wie oben erlaubt und allgemeinverständlich (z. B. „mit einem Löschfahrzeug“, „mit der Drehleiter“). Keine Kürzel, keine Listen."
+    : "- Fahrzeuge: KEINE einzelnen Fahrzeuge nennen – weder Typen noch Kürzel. Nur die Feuerwehren nennen.");
+  const LAENGE = `Länge und Form (verbindlich):
+- Ziel: 1.850 bis 2.100 Zeichen inklusive Leerzeichen, auf keinen Fall mehr als 2.200 Zeichen.
+- Ausführlich und flüssig erzählen: Abläufe genauer beschreiben, Zusammenhänge erklären und allgemeines Feuerwehrwissen einbinden (z. B. warum eine Wärmebildkamera oder ein Überdrucklüfter eingesetzt wird). Aber KEINE neuen Fakten zu diesem Einsatz erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge oder Zeiten).
+- Einzahl und Mehrzahl genau übernehmen: Ist von einer Person die Rede, niemals „Personen“ schreiben (z. B. „aufgrund einer vermissten Person“).
+- Bekannte Einheiten mit bestimmtem Artikel: „die Rettungshundestaffel“, „die DLRG“, „der Polizeihubschrauber“.`;
+  let p = `${S.ki.stil}\n\n${HARD_RULES}\n\n${LAENGE}\n\n${lines.join("\n")}`;
   if ((S.ki.beispiele || "").trim()) p += `\n\nBEISPIELBERICHTE (nur für Stil und Aufbau, keine Inhalte übernehmen):\n${S.ki.beispiele.trim()}`;
   return p;
 }
@@ -690,12 +727,20 @@ async function generate() {
   for (const m of models) {
     try {
       S.busyInfo = m === models[0] ? "" : "Ich nehme einen anderen Weg, gleich geschafft …"; render();
-      const model = getGenerativeModel(ai, { model: m, generationConfig: { temperature: 0.6, maxOutputTokens: 2048 } }, { timeout: 45000 });
+      const model = getGenerativeModel(ai, { model: m, generationConfig: { temperature: 0.6, maxOutputTokens: 4096 } }, { timeout: 45000 });
       const r = await Promise.race([
         model.generateContent(prompt),
         new Promise((_, rej) => setTimeout(() => rej(new Error("Zeitüberschreitung – die KI hat nicht innerhalb von 50 Sekunden geantwortet.")), 50000))
       ]);
-      text = (r.response.text() || "").trim();
+      text = (r.response.text() || "").trim().replace(/^```[a-z]*\n?|```$/g, "").trim();
+      if (text && [...text].length > 2190) {
+        S.busyInfo = "Ich kürze den Text auf Instagram-Länge …"; render();
+        try {
+          const r2 = await model.generateContent(`Kürze den folgenden Einsatzbericht auf 1.900 bis 2.100 Zeichen (inklusive Leerzeichen). Stil, Absätze und alle wichtigen Fakten beibehalten, nichts hinzufügen. Gib nur den gekürzten Text aus.\n\n${text}`);
+          const k = (r2.response.text() || "").trim();
+          if (k && [...k].length < [...text].length) text = k;
+        } catch (e) { console.warn("Kürzen", e); }
+      }
       if (text) break;
     } catch (e) { lastErr = e; console.warn("KI", m, e); if (/app.?check|attest|recaptcha|403/i.test(String(e?.message))) break; /* Kontingent je Modell: bei 429 einfach das nächste Modell versuchen */ }
   }
@@ -727,7 +772,7 @@ async function saveReport() {
       code2: f.code2 || "", erhWann: f.erhWann || "", erhGruende: f.erhGruende || [], erhFrei: f.erhFrei || "",
       hauptfeuerwehr: d.lead.name, eigenerEinsatz: d.eigen, anforderungen: d.anfo,
       beteiligte: f.beteiligte.map(b => ({ name: b.name, fz: b.fz, lead: !!b.lead })),
-      ausschreiben: f.ausschreiben, text: S.result.text,
+      ausschreiben: f.ausschreiben, fzNennen: !!f.fzNennen, text: S.result.text,
       geaendert: serverTimestamp()
     };
     if (S.editId) await updateDoc(doc(db, "berichte", S.editId), daten);
@@ -1015,7 +1060,7 @@ const ACT = {
     const b = S.berichte.find(x => x.id === t.dataset.id); if (!b) return;
     S.form = { ...newForm(), datum: b.datum, uhrzeit: b.uhrzeit, code: b.code, klartext: b.klartext || "", ort: b.ort || "", adresse: b.adresseIntern || "",
       code2: b.code2 || "", erhWann: b.erhWann || "", erhGruende: b.erhGruende || [], erhFrei: b.erhFrei || "", erhOpen: !!b.code2,
-      besonderheiten: b.besonderheiten || "", beteiligte: (b.beteiligte || []).map(x => ({ name: x.name, fz: [...(x.fz || [])], lead: !!x.lead })), ausschreiben: !!b.ausschreiben };
+      besonderheiten: b.besonderheiten || "", beteiligte: (b.beteiligte || []).map(x => ({ name: x.name, fz: [...(x.fz || [])], lead: !!x.lead })), ausschreiben: !!b.ausschreiben, fzNennen: !!b.fzNennen };
     S.result = { text: b.text || "" }; S.editId = b.id; S.modal = null; S.view = "neu"; S.error = ""; render(); window.scrollTo(0, 0);
   },
   togglestep: t => { const n = +t.dataset.n; S.step = S.step === n ? 0 : n; render(); },

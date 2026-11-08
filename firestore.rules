@@ -36,6 +36,11 @@ service cloud.firestore {
     }
 
     // Stammdaten & KI-Einstellungen
+    // Automatisch gesicherter Entwurf – nur der eigene
+    match /entwuerfe/{uid} {
+      allow read, write: if hasProfile() && request.auth.uid == uid;
+    }
+
     match /config/{docId} {
       allow read: if hasProfile();
       allow write: if isAdmin();
