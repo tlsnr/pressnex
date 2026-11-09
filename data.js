@@ -1372,10 +1372,17 @@ export const DEFAULT_STAMM = {
    "punkte": [
     "## Rauch & Feuer",
     "Gemeldete Lage bestätigte sich",
+    "Lage zunächst unklar",
+    "Brandgeruch wahrnehmbar",
+    "Leichte Rauchentwicklung im Gebäude",
+    "Leichte Rauchentwicklung außerhalb des Gebäudes",
+    "Starke Rauchentwicklung im Gebäude",
     "Starke Rauchentwicklung sichtbar",
+    "Rauch drang aus einem Fenster",
     "Rauch drang aus dem Dachbereich",
     "Brannte bereits in voller Ausdehnung",
     "Flammen schlugen aus dem Fenster",
+    "Feuerschein sichtbar",
     "Feuer drohte auf ein Nachbargebäude überzugreifen",
     "Keine Feststellungen bei Erkundung",
     "## Vor Ort",
@@ -1389,7 +1396,15 @@ export const DEFAULT_STAMM = {
     "Rettungsdienst bereits vor Ort",
     "## Bedingungen",
     "Dunkelheit erschwerte die Arbeiten",
-    "Starker Wind erschwerte die Löscharbeiten"
+    "Starker Wind erschwerte die Löscharbeiten",
+    "Glätte erschwerte die Anfahrt und die Arbeiten",
+    "Starkregen erschwerte die Arbeiten",
+    "Hohe Temperaturen belasteten die Einsatzkräfte",
+    "Kälte erschwerte die Arbeiten",
+    "Einsatzstelle schwer zugänglich",
+    "Rauch zog über ein Wohngebiet",
+    "Löschwasserversorgung vor Ort unzureichend",
+    "Starker Verkehr an der Einsatzstelle"
    ]
   },
   {

@@ -237,7 +237,7 @@ button:focus-visible{outline:3px solid var(--red-line);outline-offset:2px}
 .erh{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px dashed var(--line2);border-radius:16px;background:#F9FAFC}
 /* Rückfragen & Zahlen-Fragen */
 .chip.ask{border-style:dashed}
-.chip.ghost{background:transparent;color:var(--muted,#64748b);border-color:transparent;text-decoration:underline}
+.chip.skip{background:transparent;color:var(--muted);border-color:transparent;text-decoration:underline;box-shadow:none}
 .rq{display:grid;gap:10px;margin:12px 0}
 .rq-item{border:1.5px solid #F59E0B;background:#FFFBEB;border-radius:14px;padding:12px 14px;animation:rqin .25s ease}
 .rq-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:#78350F}
@@ -254,3 +254,59 @@ button:focus-visible{outline:3px solid var(--red-line);outline-offset:2px}
 .qopts{display:flex;flex-direction:column;gap:8px;margin:14px 0}
 .qopts .qo{justify-content:flex-start;min-height:52px;font-size:16px}
 .btn.ghost.full{width:100%}
+
+/* ---------- Fortschritt ---------- */
+.stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:0;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 8px 12px;box-shadow:var(--shadow)}
+.sp{position:relative;display:flex;flex-direction:column;align-items:center;gap:7px;border:0;background:none;cursor:pointer;padding:0 2px;min-width:0}
+.sp::before{content:"";position:absolute;top:17px;right:calc(50% + 22px);left:calc(-50% + 22px);height:3px;border-radius:2px;background:var(--line2)}
+.sp:first-child::before{display:none}
+.sp.prevdone::before{background:var(--ok)}
+.sp-dot{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:15px;background:#EEF2F7;color:var(--muted);border:2px solid transparent;transition:all .2s}
+.sp-lbl{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.sp.done .sp-dot,.sp.isdone:not(.cur) .sp-dot{background:var(--ok);color:#fff}
+.sp.isdone .sp-lbl{color:var(--ok)}
+.sp.cur .sp-dot{background:var(--red);color:#fff;box-shadow:0 0 0 5px var(--red-soft)}
+.sp.cur .sp-lbl{color:var(--ink);font-weight:700}
+.sp.warn .sp-dot{background:var(--warn-soft);color:var(--warn);border-color:#F59E0B}
+.sp.warn .sp-lbl{color:var(--warn)}
+@media (min-width:700px){.sp-lbl{font-size:13px}.stepper{padding:16px 12px 14px}}
+
+/* aktueller Schritt hervorgehoben */
+.step-card{transition:border-color .2s,box-shadow .2s,background .2s}
+.step-card.current{border-color:#CBD5E1;background:#FBFCFE;box-shadow:0 0 0 3px #E2E8F0,var(--shadow)}
+.step-card.current .step-num{background:var(--red);color:#fff}
+.step-card.warn:not(.current){border-color:#FCD34D}
+.step-card.warn .step-num{background:var(--warn-soft);color:var(--warn)}
+.step-card.warn .step-title small{color:var(--warn);font-weight:600}
+@media (min-width:1000px){
+  .step-card .step-num{background:#EEF2F7;color:var(--ink2)}
+  .step-card.current .step-num{background:var(--red);color:#fff}
+  .step-card.done:not(.current) .step-num{background:var(--ok-soft);color:var(--ok)}
+  .step-card.warn:not(.current) .step-num{background:var(--warn-soft);color:var(--warn)}
+}
+.notice.warn{background:var(--warn-soft);border:1px solid #FCD34D;color:#78350F}
+
+/* ---------- Aufklappbare Stichpunkt-Gruppen ---------- */
+.bgroups{display:flex;flex-direction:column;gap:8px}
+.bgrp{border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;transition:border-color .2s}
+.bgrp.open{border-color:var(--line2);box-shadow:0 2px 10px rgba(15,23,42,.05)}
+.bgrp-head{display:flex;align-items:center;gap:10px;width:100%;min-height:50px;padding:0 14px;border:0;background:none;cursor:pointer;text-align:left;font-weight:650;font-size:15px;color:var(--ink)}
+.bgrp-head>span:first-child{flex:1;min-width:0}
+.bgrp-chev{font-size:22px;color:var(--muted);transition:transform .2s;line-height:1}
+.bgrp.open .bgrp-chev{transform:rotate(90deg)}
+.bgrp .bchips{max-height:none;overflow:visible;padding:2px 12px 14px}
+.bcount{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:var(--red);color:#fff;font-size:12px;font-weight:700}
+.btab .bcount{margin-left:6px;min-width:19px;height:19px;font-size:11px}
+.btab:not(.on) .bcount{background:var(--ink2)}
+
+/* Erkundung */
+.erk{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding:12px;border-radius:12px;background:#fff;border:1px solid var(--line)}
+.erk-list{display:flex;flex-wrap:wrap;gap:6px}
+.erk-chips{margin:12px 0 16px}
+
+/* Hauptfeuerwehr-Fahrzeuge direkt in Schritt 2 */
+.step-body>.flabel{margin-bottom:-6px}
+.chip.ghost.add{min-height:38px}
+.sp-lbl .l-long{display:none}
+@media (min-width:560px){.sp-lbl .l-long{display:inline}.sp-lbl .l-short{display:none}}
+.bchips .chip,.erk-chips .chip{text-align:left;justify-content:flex-start}

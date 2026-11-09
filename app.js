@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-0940";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1000";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -380,16 +380,32 @@ function renderShell(el) {
 }
 
 /* ---------- Ansicht: Neuer Bericht ---------- */
-function stepCard(n, title, req, summary, body) {
-  const open = S.step === n;
-  const done = !!summary;
-  return `<section class="card step-card ${open ? "open" : ""} ${done ? "done" : ""}">
+const STEP_NAMES = ["Einsatz", "Hauptfeuerwehr", "Weitere Kräfte", "Lage"];
+const STEP_SHORT = ["Einsatz", "Feuerwehr", "Kräfte", "Lage"];
+function stepFehlt(n, f) {
+  const d = ableiten(f), m = [];
+  if (n === 1) { if (!f.datum) m.push("Datum"); if (!f.uhrzeit) m.push("Alarmzeit"); if (!f.code) m.push("Einsatzstichwort"); }
+  if (n === 2 && !d.lead) m.push("Hauptfeuerwehr");
+  if (n === 3 && d.lead && !f.beteiligte.some(b => isLingen(b.name))) m.push("mindestens eine Lingener Ortsfeuerwehr");
+  return m;
+}
+const stepWarn = (n, f) => { const m = stepFehlt(n, f); return m.length && (S.tried || (S.maxStep || 1) > n) ? m : []; };
+function stepper(f, done) {
+  return `<nav class="stepper" aria-label="Fortschritt">${[1, 2, 3, 4].map(n => {
+    const warn = stepWarn(n, f).length, cls = S.step === n ? "cur" : done[n] ? "done" : warn ? "warn" : "";
+    return `<button type="button" class="sp ${cls} ${done[n] ? "isdone" : ""} ${done[n - 1] ? "prevdone" : ""}" data-act="gostep" data-n="${n}" aria-current="${S.step === n ? "step" : "false"}">
+      <span class="sp-dot">${done[n] && S.step !== n ? "✓" : warn && S.step !== n ? "!" : n}</span><span class="sp-lbl"><span class="l-long">${STEP_NAMES[n - 1]}</span><span class="l-short">${STEP_SHORT[n - 1]}</span></span></button>`;
+  }).join("")}</nav>`;
+}
+function stepCard(n, title, req, summary, body, done) {
+  const open = S.step === n, warn = stepWarn(n, S.form);
+  return `<section class="card step-card ${open ? "open current" : ""} ${done ? "done" : ""} ${warn.length ? "warn" : ""}" data-step="${n}">
     <button type="button" class="step-head" data-act="togglestep" data-n="${n}" aria-expanded="${open}">
-      <span class="step-num">${done ? "✓" : n}</span>
-      <span class="step-title"><b class="${req ? "req" : ""}">${title}</b><small>${summary ? esc(summary) : (req ? "Pflichtangabe" : "optional")}</small></span>
+      <span class="step-num">${done ? "✓" : warn.length ? "!" : n}</span>
+      <span class="step-title"><b class="${req ? "req" : ""}">${title}</b><small>${warn.length ? "Fehlt: " + esc(warn.join(", ")) : summary ? esc(summary) : (req ? "Pflichtangabe" : "optional")}</small></span>
       <span class="step-chev" aria-hidden="true">›</span>
     </button>
-    <div class="step-body">${body}</div>
+    <div class="step-body">${warn.length && open ? `<div class="notice warn">Bitte noch ergänzen: <b>${esc(warn.join(", "))}</b></div>` : ""}${body}</div>
   </section>`;
 }
 function erhBlock(f) {
@@ -404,8 +420,28 @@ function erhBlock(f) {
     <div class="chips">${["auf der Anfahrt", "vor Ort"].map(w => `<button type="button" class="chip small ${f.erhWann === w ? "on" : ""}" data-act="erhwann" data-v="${w}">${w[0].toUpperCase() + w.slice(1)}</button>`).join("")}</div>
     <span class="flabel">Grund</span>
     <div class="chips">${ERH_GRUENDE.map(g => `<button type="button" class="chip small ${f.erhGruende.includes(g) ? "on" : ""}" data-act="erhgrund" data-v="${esc(g)}">${f.erhGruende.includes(g) ? "✓ " : ""}${esc(g)}</button>`).join("")}</div>
+    ${f.erhGruende.includes(ERKUNDUNG) ? `<div class="erk"><span class="flabel">Festgestellt bei der Erkundung</span>
+      ${erkundungZeilen(f).length ? `<div class="erk-list">${erkundungZeilen(f).map(l => `<span class="tag ok">${esc(l)}</span>`).join("")}</div>` : `<p class="hint">Noch nichts angegeben.</p>`}
+      <button type="button" class="chip small" data-act="erkopen">${erkundungZeilen(f).length ? "Ändern" : "+ Feststellung auswählen"}</button></div>` : ""}
     <input type="text" data-bind="erhFrei" value="${esc(f.erhFrei)}" placeholder="Anderer Grund (optional)">
   </div>`;
+}
+const ERKUNDUNG = "Lageerkundung durch ersteintreffende Kräfte";
+const ERK_OPTS = ["Lage zunächst unklar", "Brandgeruch wahrnehmbar", "Leichte Rauchentwicklung im Gebäude", "Leichte Rauchentwicklung außerhalb des Gebäudes",
+  "Starke Rauchentwicklung im Gebäude", "Starke Rauchentwicklung sichtbar", "Rauch drang aus dem Dachbereich", "Rauch drang aus einem Fenster",
+  "Flammen schlugen aus dem Fenster", "Feuerschein sichtbar", "Brannte bereits in voller Ausdehnung", "Feuer drohte auf ein Nachbargebäude überzugreifen"];
+const ERK_PERS = "Es befanden sich noch [#] {Person|Personen} im Gebäude";
+function erkundungZeilen(f) {
+  const z = lageZeilen(f), re = tplRegex(ERK_PERS);
+  return z.filter(l => ERK_OPTS.some(o => tplRegex(o).test(l)) || re.test(l));
+}
+function erkModal() {
+  const f = S.form;
+  S.modal = `<div class="sheet-head"><h2>Was haben die ersteintreffenden Kräfte festgestellt?</h2><button class="iconbtn" data-act="closemodal" aria-label="Fertig">${ICON.x}</button></div>
+    <p class="hint">Mehrfachauswahl möglich – landet automatisch in der Lagebeschreibung.</p>
+    <div class="chips erk-chips">${ERK_OPTS.map(o => { const on = hatZeile(f, o); return `<button type="button" class="chip small ${on ? "on" : ""}" data-act="erkopt" data-v="${esc(o)}">${on ? "✓ " : ""}${esc(o)}</button>`; }).join("")}
+      ${(() => { const hit = lageZeilen(f).find(l => tplRegex(ERK_PERS).test(l)); return `<button type="button" class="chip small ${hit ? "on" : "ask"}" data-act="erkpers">${hit ? "✓ " + esc(hit) : "Es befanden sich noch … Personen im Gebäude"}</button>`; })()}</div>
+    <button type="button" class="btn primary block" data-act="closemodal">Fertig</button>`;
 }
 function viewNeu(main) {
   const f = S.form, d = ableiten(f);
@@ -414,7 +450,7 @@ function viewNeu(main) {
   const leadNames = new Set(f.beteiligte.filter(b => b.lead).map(b => b.name));
   const quickLead = S.stamm.eigene.map(n => `<button type="button" class="chip ${leadNames.has(n) ? "on" : ""}" data-act="setlead" data-name="${esc(n)}">${esc(n.replace("Feuerwehr ", ""))}</button>`).join("");
   const present = new Set(f.beteiligte.map(b => b.name));
-  const quickAdd = S.stamm.eigene.filter(n => !present.has(n)).map(n => `<button type="button" class="chip small ghost" data-act="addwehr" data-name="${esc(n)}">+ ${esc(n.replace("Feuerwehr ", ""))}</button>`).join("");
+  const quickAdd = S.stamm.eigene.filter(n => !present.has(n)).map(n => `<button type="button" class="chip small ghost add" data-act="addwehr" data-name="${esc(n)}">+ ${esc(n.replace("Feuerwehr ", ""))}</button>`).join("");
   const nPunkte = f.besonderheiten.split("\n").filter(l => l.trim()).length;
 
   const s1 = st ? `${st.code}${f.code2 ? " → " + f.code2 : ""}${f.ort ? " · " + f.ort : ""} · ${deDate(f.datum)} ${f.uhrzeit}` : "";
@@ -422,6 +458,9 @@ function viewNeu(main) {
   const andere = f.beteiligte.filter(b => !b.lead);
   const s3 = andere.length ? andere.map(b => b.name.replace("Feuerwehr ", "")).join(", ") : "";
   const s4 = nPunkte ? `${nPunkte} Stichpunkt${nPunkte > 1 ? "e" : ""}` : "";
+  const leadIdx = f.beteiligte.findIndex(b => b.lead);
+  const done = { 1: !stepFehlt(1, f).length, 2: !!d.lead, 3: andere.length > 0 && !stepFehlt(3, f).length, 4: nPunkte > 0 };
+  S.maxStep = Math.max(S.maxStep || 1, S.step || 1);
 
   const body1 = `<div class="grid2">
       <label class="f"><span class="req">Datum</span><input type="date" data-bind="datum" value="${esc(f.datum)}"></label>
@@ -443,12 +482,12 @@ function viewNeu(main) {
     <div class="picker" data-picker="lead">
       <input type="search" placeholder="Auswärtige Feuerwehr suchen (z. B. Lohne)" data-search="lead" autocomplete="off"><div class="picklist hidden"></div>
     </div>
-    ${d.lead ? `<p class="hint">${d.eigen ? "Einsatz im Stadtgebiet – " + esc(d.lead.name) + " führt." : "Unterstützungseinsatz bei der " + esc(d.lead.name) + "."}</p>` : ""}
+    ${leadIdx >= 0 ? `<span class="flabel">Fahrzeuge der ${esc(f.beteiligte[leadIdx].name)}</span>${wehrCard(f.beteiligte[leadIdx], leadIdx, true)}` : ""}
     <button type="button" class="btn next" data-act="nextstep" data-n="3">Weiter</button>`;
 
-  const body3 = `<p class="hint desk">Fahrzeuge antippen, die im Einsatz waren. Auch Rettungsdienst und Polizei lassen sich hinzufügen.</p>
-    ${f.beteiligte.map((b, i) => wehrCard(b, i)).join("") || `<p class="hint">Zuerst die Hauptfeuerwehr wählen.</p>`}
-    ${quickAdd ? `<div class="chips">${quickAdd}</div>` : ""}
+  const body3 = `<p class="hint">Weitere Ortsfeuerwehren, Rettungsdienst oder Polizei hinzufügen – jeweils mit ihren Fahrzeugen.</p>
+    ${f.beteiligte.map((b, i) => b.lead ? "" : wehrCard(b, i)).join("")}
+    <div class="chips">${quickAdd}${["Rettungsdienst", "Polizei"].filter(n => !present.has(n)).map(n => `<button type="button" class="chip small ghost add" data-act="addwehr" data-name="${n}">+ ${n}</button>`).join("")}</div>
     <div class="picker" data-picker="add">
       <input type="search" placeholder="Weitere Feuerwehr, Rettungsdienst, Polizei …" data-search="add" autocomplete="off"><div class="picklist hidden"></div>
     </div>
@@ -462,14 +501,15 @@ function viewNeu(main) {
 
   main.innerHTML = `<div class="stack neu">
     ${S.editId ? `<div class="notice info row" style="justify-content:space-between;align-items:center"><span><b>Bericht bearbeiten</b></span><button class="btn" data-act="canceledit">Abbrechen</button></div>` : ""}
+    ${stepper(f, done)}
     <div class="cols">
       <div class="stack">
-        ${stepCard(1, "Einsatz", true, s1, body1)}
-        ${stepCard(2, "Hauptfeuerwehr", true, s2, body2)}
-        ${stepCard(3, "Beteiligte Kräfte", false, s3, body3)}
+        ${stepCard(1, "Einsatz", true, s1, body1, done[1])}
+        ${stepCard(2, "Hauptfeuerwehr", true, s2, body2, done[2])}
+        ${stepCard(3, "Weitere beteiligte Kräfte", false, s3, body3, done[3])}
       </div>
       <div class="stack">
-        ${stepCard(4, "Lagebeschreibung", false, s4, body4)}
+        ${stepCard(4, "Lagebeschreibung", false, s4, body4, done[4])}
         <div class="genbar">
           ${S.error ? `<div class="notice err">${esc(S.error)}</div>` : ""}
           <button class="btn primary big block" data-act="generate" ${S.busy ? "disabled" : ""}>${S.busy ? `<span class="spinner"></span> KI schreibt …` : `${ICON.spark} Bericht mit KI erstellen`}</button>
@@ -572,7 +612,8 @@ function tplCommit(val) {
   const line = tplFill(t, t.includes("[#]") ? Number(v) : v, v);
   if (S.pendingReplace) { lageReplace(f, S.pendingReplace, line); S.pendingReplace = null; }
   else lageAdd(f, line);
-  S.pendingTpl = null; S.modal = null; saveDraft(); askNew();
+  S.pendingTpl = null; S.modal = null; saveDraft();
+  if (S.afterTpl === "erk") { S.afterTpl = null; erkModal(); } else askNew();
   const y = window.scrollY; render(); window.scrollTo(0, y);
   const ta = $("#lage"); if (ta) ta.scrollTop = ta.scrollHeight;
 }
@@ -582,15 +623,27 @@ function bausteinPanel(f) {
   if (!tabs.length) return "";
   const cur = tabs.find(t => t.reiter === (S.btab || autoTab(f))) || tabs[0];
   S.curTab = cur.reiter;
-  const zeilen = lageZeilen(f);
-  return `<div class="btabs" role="tablist">${tabs.map(t => `<button type="button" role="tab" aria-selected="${t === cur}" class="btab ${t === cur ? "on" : ""}" data-act="btab" data-v="${esc(t.reiter)}">${esc(t.reiter)}</button>`).join("")}</div>
-    <div class="bchips">${cur.punkte.map(p => {
-      if (p.startsWith("## ")) return `<div class="bgroup">${esc(p.slice(3))}</div>`;
-      const { t, q } = tplSplit(p);
-      const full = (cur.prefix || "") + t, re = tplRegex(full);
-      const hit = zeilen.find(l => re.test(l));
-      const label = hit && tplHasVars(t) ? hit.slice((cur.prefix || "").length) : tplLabel(t);
-      return `<button type="button" class="chip small ${hit ? "on" : ""}${tplHasVars(t) && !hit ? " ask" : ""}" data-act="baustein" data-v="${esc(full)}" data-q="${esc(q)}">${hit ? "✓ " : ""}${esc(label)}</button>`; }).join("")}</div>`;
+  const zeilen = lageZeilen(f), pre = cur.prefix || "";
+  const tabCount = t => t.punkte.filter(p => !p.startsWith("## ")).filter(p => { const re = tplRegex((t.prefix || "") + tplSplit(p).t); return zeilen.some(l => re.test(l)); }).length;
+  const groups = []; let g = null;
+  for (const p of cur.punkte) { if (p.startsWith("## ")) { g = { name: p.slice(3), items: [] }; groups.push(g); } else { if (!g) { g = { name: "", items: [] }; groups.push(g); } g.items.push(p); } }
+  S.bopen = S.bopen || {};
+  const openName = S.bopen[cur.reiter];
+  const chip = p => {
+    const { t, q } = tplSplit(p), full = pre + t, re = tplRegex(full);
+    const hit = zeilen.find(l => re.test(l));
+    const label = hit && tplHasVars(t) ? hit.slice(pre.length) : tplLabel(t);
+    return `<button type="button" class="chip small ${hit ? "on" : ""}${tplHasVars(t) && !hit ? " ask" : ""}" data-act="baustein" data-v="${esc(full)}" data-q="${esc(q)}">${hit ? "✓ " : ""}${esc(label)}</button>`;
+  };
+  return `<div class="btabs" role="tablist">${tabs.map(t => { const c = tabCount(t); return `<button type="button" role="tab" aria-selected="${t === cur}" class="btab ${t === cur ? "on" : ""}" data-act="btab" data-v="${esc(t.reiter)}">${esc(t.reiter)}${c ? `<span class="bcount">${c}</span>` : ""}</button>`; }).join("")}</div>
+    <div class="bgroups">${groups.map(gr => {
+      if (!gr.name) return `<div class="bchips">${gr.items.map(chip).join("")}</div>`;
+      const n = gr.items.filter(p => { const re = tplRegex(pre + tplSplit(p).t); return zeilen.some(l => re.test(l)); }).length;
+      const open = openName === gr.name;
+      return `<div class="bgrp ${open ? "open" : ""}">
+        <button type="button" class="bgrp-head" data-act="bgrp" data-v="${esc(gr.name)}" aria-expanded="${open}"><span>${esc(gr.name)}</span>${n ? `<span class="bcount">${n}</span>` : ""}<span class="bgrp-chev" aria-hidden="true">›</span></button>
+        ${open ? `<div class="bchips">${gr.items.map(chip).join("")}</div>` : ""}</div>`;
+    }).join("")}</div>`;
 }
 
 // ---- Rückfragen im Hintergrund (regelbasiert, ohne KI-Kontingent) ----
@@ -618,11 +671,15 @@ function rueckfragen(f) {
     add("riegel", "Konnte ein Übergreifen verhindert werden?", [
       { label: "Riegelstellung aufgebaut", act: "qline", line: "Riegelstellung zum Nachbargebäude aufgebaut" },
       { label: "Ausbreitung verhindert", act: "qline", line: "Weitere Ausbreitung verhindert" }]);
+  if (f.code2 && f.erhGruende.includes(ERKUNDUNG) && !erkundungZeilen(f).length) {
+    add("erk", "Was haben die ersteintreffenden Kräfte festgestellt?", [{ label: "Feststellung auswählen", act: "qerk" }], "Grund der Stichworterhöhung war die Lageerkundung.");
+    if (out.length) out[out.length - 1].noPop = true;
+  }
   if (f.code2 && !f.erhWann)
     add("erhWann", "Wann wurde das Stichwort erhöht?", [
       { label: "Auf der Anfahrt", act: "qset", k: "erhWann", v: "auf der Anfahrt" },
       { label: "Vor Ort", act: "qset", k: "erhWann", v: "vor Ort" }]);
-  if (autoTab(f) === "Was brennt" && z.length >= 2 && !brennt.length && S.curTab !== "Was brennt")
+  if (autoTab(f) === "Was brennt" && z.length >= 2 && !brennt.length && S.curTab !== "Was brennt" && !has(/zunächst unklar|keine feststellungen|fehlalarm/i))
     { add("wasBrennt", "Was hat gebrannt?", [{ label: "Zu „Was brennt“", act: "qtab", v: "Was brennt" }], "Ohne Angabe bleibt der Bericht beim Brandobjekt allgemein."); if (out.length) out[out.length - 1].noPop = true; }
   return out;
 }
@@ -648,16 +705,16 @@ function rueckfragenHtml(f) {
     <div class="rq-head"><span class="rq-ico">?</span><strong>${esc(q.frage)}</strong></div>
     ${q.info ? `<p class="hint">${esc(q.info)}</p>` : ""}
     <div class="chips">${q.opts.map((o, j) => `<button type="button" class="chip small" data-act="qopt" data-i="${i}" data-j="${j}">${esc(o.label)}</button>`).join("")}
-    <button type="button" class="chip small ghost" data-act="qskip" data-v="${esc(q.id)}">Weiß nicht / überspringen</button></div></div>`).join("")}</div>`;
+    <button type="button" class="chip small skip" data-act="qskip" data-v="${esc(q.id)}">Weiß nicht / überspringen</button></div></div>`).join("")}</div>`;
 }
-function wehrCard(b, i) {
+function wehrCard(b, i, inline) {
   const own = S.stamm.eigeneFahrzeuge[b.name] || [];
   const extra = b.fz.filter(v => !own.includes(v));
   const chips = [...own, ...extra].map(v => `<button type="button" class="chip small ${b.fz.includes(v) ? "on" : ""}" data-act="togglefz" data-i="${i}" data-v="${esc(v)}">${b.fz.includes(v) ? "✓ " : ""}${esc(v)}</button>`).join("");
   const opts = S.stamm.fahrzeuge.filter(f => !own.includes(f.kurz) && !b.fz.includes(f.kurz)).map(f => `<option value="${esc(f.kurz)}">${esc(f.kurz)} – ${esc(f.lang)}</option>`).join("");
   return `<div class="wehr ${b.lead ? "lead" : ""}">
-    <div class="wehr-head"><div><b>${esc(b.name)}</b> ${b.lead ? `<span class="tag red">führt</span>` : `<span class="tag soft">${/feuerwehr/i.test(b.name) ? "unterstützt" : "vor Ort"}</span>`}</div>
-      <button type="button" class="iconbtn" data-act="removewehr" data-i="${i}" aria-label="${esc(b.name)} entfernen">${ICON.x}</button></div>
+    ${inline ? "" : `<div class="wehr-head"><div><b>${esc(b.name)}</b> <span class="tag soft">${/feuerwehr/i.test(b.name) ? "unterstützt" : "vor Ort"}</span></div>
+      <button type="button" class="iconbtn" data-act="removewehr" data-i="${i}" aria-label="${esc(b.name)} entfernen">${ICON.x}</button></div>`}
     ${chips ? `<div class="chips">${chips}</div>` : ""}
     <select data-act-change="addfz" data-i="${i}" aria-label="Fahrzeug hinzufügen"><option value="">+ Fahrzeug hinzufügen …</option>${opts}<option value="__frei">Anderes Fahrzeug eingeben …</option></select>
   </div>`;
@@ -875,7 +932,13 @@ Formulierungsregeln (verbindlich):
 
 async function generate() {
   const errs = validate(S.form);
-  if (errs.length) { S.error = errs.join(" "); render(); return; }
+  if (errs.length) {
+    S.error = errs.join(" "); S.tried = true;
+    const n = [1, 2, 3].find(k => stepFehlt(k, S.form).length);
+    if (n) { S.step = n; render(); document.querySelector(`.step-card[data-step="${n}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    else render();
+    return;
+  }
   S.error = ""; S.busy = true; S.busyStart = Date.now(); render();
   clearInterval(S.timerId);
   S.timerId = setInterval(() => {
@@ -1210,18 +1273,25 @@ const ACT = {
   erhclear: () => { Object.assign(S.form, { code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false }); S.btab = ""; render(); },
   clearcode2: () => { S.form.code2 = ""; render(); },
   erhwann: t => { S.form.erhWann = S.form.erhWann === t.dataset.v ? "" : t.dataset.v; render(); },
-  erhgrund: t => { const g = t.dataset.v, a = S.form.erhGruende; S.form.erhGruende = a.includes(g) ? a.filter(x => x !== g) : [...a, g]; render(); },
+  erhgrund: t => { const g = t.dataset.v, a = S.form.erhGruende, an = !a.includes(g); S.form.erhGruende = an ? [...a, g] : a.filter(x => x !== g); saveDraft();
+    if (an && g === ERKUNDUNG) erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  erkopen: () => { erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  erkopt: t => { const f = S.form, v = t.dataset.v; if (hatZeile(f, v)) lageRemove(f, v); else lageAdd(f, v); saveDraft(); erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  erkpers: () => { const f = S.form; if (hatZeile(f, ERK_PERS)) { lageRemove(f, ERK_PERS); saveDraft(); erkModal(); render(); } else { S.pendingReplace = null; S.afterTpl = "erk"; openTpl(ERK_PERS, tplFind(ERK_PERS).q || "Wie viele Personen befanden sich noch im Gebäude?"); } },
+  bgrp: t => { const v = t.dataset.v; S.bopen = S.bopen || {}; S.bopen[S.curTab] = S.bopen[S.curTab] === v ? null : v; const y = window.scrollY; render(); window.scrollTo(0, y);
+    const el = [...document.querySelectorAll(".bgrp-head")].find(x => x.dataset.v === v); if (el) { const r = el.getBoundingClientRect(); if (r.top < 80 || r.top > innerHeight * 0.6) window.scrollBy({ top: r.top - 140, behavior: "smooth" }); } },
+  gostep: t => { const n = +t.dataset.n; S.step = n; render(); const el = document.querySelector(`.step-card[data-step="${n}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
   clearcode: () => { S.form.code = ""; S.form.klartext = ""; render(); },
   setlead: t => { setLead(t.dataset.name); render(); },
-  addwehr: t => { S.form.beteiligte.push({ name: t.dataset.name, fz: [], lead: false }); render(); },
+  addwehr: t => { if (!S.form.beteiligte.some(b => b.name === t.dataset.name)) S.form.beteiligte.push({ name: t.dataset.name, fz: [], lead: false }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   removewehr: t => { S.form.beteiligte.splice(+t.dataset.i, 1); render(); },
   togglefz: t => { const b = S.form.beteiligte[+t.dataset.i], v = t.dataset.v; b.fz = b.fz.includes(v) ? b.fz.filter(x => x !== v) : [...b.fz, v]; render(); },
-  resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; render(); } },
+  resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; render(); } },
   generate: () => generate(),
   copyresult: () => copy(S.result.text),
   save: () => saveReport(),
   openreport: t => openReport(t.dataset.id),
-  closemodal: () => { S.modal = null; render(); },
+  closemodal: () => { S.modal = null; S.afterTpl = null; render(); },
   "closemodal-bg": (t, e) => { if (e.target === t) { S.modal = null; render(); } },
   copyreport: t => { const el = $("#edittext"); copy(el ? el.value : S.berichte.find(b => b.id === t.dataset.id).text); },
   updatereport: async t => {
@@ -1259,6 +1329,7 @@ const ACT = {
     else if (o.act === "qrepl") lageReplace(f, o.t, o.line);
     else if (o.act === "qset") f[o.k] = o.v;
     else if (o.act === "qtab") { S.btab = o.v; S.btabCenter = true; S.bchipScroll = 0; }
+    else if (o.act === "qerk") { erkModal(); render(); return; }
     saveDraft(); askNew();
     const y = window.scrollY; render(); window.scrollTo(0, y);
   },
@@ -1299,4 +1370,13 @@ document.addEventListener("click", e => {
 render();
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.id === "qfree") { e.preventDefault(); tplCommit(e.target.value); }
+});
+
+// PC/iPad quer: angeklickten Schritt als „aktuell“ markieren, ohne neu zu zeichnen
+document.addEventListener("pointerdown", e => {
+  const card = e.target.closest?.(".step-card"); if (!card || S.view !== "neu") return;
+  const n = +card.dataset.step; if (!n || S.step === n || innerWidth < 1000) return;
+  S.step = n; S.maxStep = Math.max(S.maxStep || 1, n);
+  document.querySelectorAll(".step-card").forEach(c => c.classList.toggle("current", c === card));
+  document.querySelectorAll(".stepper .sp").forEach(b => { const on = +b.dataset.n === n; b.classList.toggle("cur", on); b.setAttribute("aria-current", on ? "step" : "false"); });
 });
