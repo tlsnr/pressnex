@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261109-1300";
+import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261109-1305";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -1030,6 +1030,10 @@ function buildPrompt(f) {
 - Flüssig erzählen. Eine kurze Erklärung (höchstens ein Satz) ist nur erlaubt, wenn sie direkt zu einer angegebenen Maßnahme gehört (z. B. warum eine Wärmebildkamera eingesetzt wurde). KEINE allgemeinen Füllsätze über die Aufgaben der Feuerwehr, Bedeutung von Einsätzen, besonnenes Vorgehen o. Ä. KEINE neuen Fakten erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge, Zeiten oder Tätigkeiten).
 - Gründe und Absichten nicht ausschmücken (z. B. nicht „um weitere Kräfte für eine drohende Brandausbreitung bereitzustellen“), nur die angegebenen Gründe nennen.
 - Den Bericht immer vollständig zu Ende schreiben.
+- Kein „rund“, „etwa“ oder „circa“ vor Zahlen oder Zeiten aus den Stichpunkten („Nach drei Stunden …“).
+- Die Lage beim Eintreffen aktiv und einfach schildern, z. B. „Vor Ort waren zwei PKW beteiligt, eine Person war eingeklemmt.“ – nicht „waren … vorgefunden worden“.
+- Rettungsdienst, Polizei und Rettungshubschrauber in EINEM kurzen Satz nennen, z. B. „Ebenfalls im Einsatz waren der Rettungsdienst mit zwei Rettungswagen und einem Notarzt, der Rettungshubschrauber Christoph Europa 2 sowie die Polizei.“ Keine Nebensätze wie „der im Einsatz war“.
+- Verletzte: „… wurden in ein Krankenhaus gebracht“ – nicht „nach dem Transport ins Krankenhaus übergeben“.
 - Zahlen aus den Stichpunkten bis zwölf als Wort schreiben („ein Fahrzeug“, „zwei Personen“). Bei der Zahl 1 immer Einzahl verwenden.
 - Einzahl und Mehrzahl genau übernehmen: Ist von einer Person die Rede, niemals „Personen“ schreiben (z. B. „aufgrund einer vermissten Person“).
 - Bekannte Einheiten mit bestimmtem Artikel: „die Rettungshundestaffel“, „die DLRG“, „der Polizeihubschrauber“.
@@ -1093,9 +1097,9 @@ async function generate() {
   for (const m of models) {
     try {
       S.busyInfo = m === models[0] ? "" : "Ich nehme einen anderen Weg, gleich geschafft …"; render();
-      const letztes = m === models.at(-1), limit = letztes ? 45000 : 25000;
-      // Weniger „Nachdenken“ bei den Flash-Modellen → schneller; Lite-Modelle denken ohnehin kaum
-      const denken = /flash$/.test(m) && !S.ohneDenken?.[m];
+      const limit = 50000;
+      // Denkzeit der Modelle auf Standard lassen (bessere Texte)
+      const denken = false;
       const model = getGenerativeModel(ai, { model: m, generationConfig: { temperature: 0.6, ...(denken ? { thinkingConfig: { thinkingLevel: "LOW" } } : {}) } }, { timeout: limit });
       let r;
       try {
