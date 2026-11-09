@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-0935";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-0940";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -497,10 +497,12 @@ function viewNeu(main) {
 }
 
 function autoTab(f) {
-  const st = aaoByCode(f.code); if (!st) return "Was brennt";
-  if (/X/.test(st.block)) return "Gefahrgut";
+  // Bei einer Stichworterhöhung zählt das erhöhte Stichwort – es beschreibt die tatsächliche Lage
+  const st = aaoByCode(f.code2) || aaoByCode(f.code); if (!st) return "Was brennt";
+  if (/öl|benzin|straßenreinigung|wasser/i.test(st.code) && st.art === "Hilfeleistung") return "Technische Hilfe";
   if (/BMA|RWM|Erkundung|Nachschau/i.test(st.code)) return "Lage";
   if (st.art === "Brand") return "Was brennt";
+  if (/X/.test(st.block)) return "Gefahrgut";
   if (/gefahrgut|\bgas/i.test(st.klartext)) return "Gefahrgut";
   if (st.art === "MANV") return "Personen";
   if (st.art === "Hilfeleistung") return "Technische Hilfe";
@@ -1199,12 +1201,13 @@ const ACT = {
     if (kind === "aao") { const a = aaoByCode(v); S.form.code = v; S.form.klartext = a.klartext;
       if (a.art === "Anforderung" && !ableiten(S.form).lead) toast("Anforderung: Bitte die Hauptfeuerwehr wählen, die angefordert hat"); }
     if (kind === "aao2") { S.form.code2 = v; S.form.erhOpen = true; }
+    if (kind === "aao" || kind === "aao2") { S.btab = ""; S.centeredTab = null; }
     if (kind === "lead") setLead(v);
     if (kind === "add" && !S.form.beteiligte.some(b => b.name === v)) S.form.beteiligte.push({ name: v, fz: [], lead: false });
     render();
   },
   erhopen: () => { S.form.erhOpen = true; render(); },
-  erhclear: () => { Object.assign(S.form, { code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false }); render(); },
+  erhclear: () => { Object.assign(S.form, { code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false }); S.btab = ""; render(); },
   clearcode2: () => { S.form.code2 = ""; render(); },
   erhwann: t => { S.form.erhWann = S.form.erhWann === t.dataset.v ? "" : t.dataset.v; render(); },
   erhgrund: t => { const g = t.dataset.v, a = S.form.erhGruende; S.form.erhGruende = a.includes(g) ? a.filter(x => x !== g) : [...a, g]; render(); },
