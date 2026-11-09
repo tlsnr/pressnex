@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1000";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1015";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -25,7 +25,7 @@ const DEFAULT_KI = {
 Aufbau und Stil (orientiert an den bisherigen Berichten der Pressesprecher):
 - KEINE Überschrift. Erster Satz: Alarmierung mit Tageszeit, Uhrzeit, AAO-Stichwort in Anführungszeichen und Ortsteil, z. B. "Am Freitagmorgen wurden wir um 09:26 Uhr mit dem Einsatzstichwort „F3_Garage/Schuppen“ in den Stadtteil Laxten alarmiert."
 - Wurden weitere Lingener Ortsfeuerwehren direkt mitalarmiert, gehören sie in den ersten Satz: "… wurden wir gemeinsam mit der Feuerwehr Altenlingen mit dem Einsatzstichwort „F3_Schiff“ in den Bereich … alarmiert."
-- Typische Formulierungen der Pressesprecher: "Beim Eintreffen an der Einsatzstelle bestätigte sich die gemeldete Lage.", "… stand in Vollbrand.", "Umgehend wurde die Brandbekämpfung mittels eines C-Rohres eingeleitet.", "Zwei Trupps unter Atemschutz gingen zur Brandbekämpfung vor und konnten das Feuer zügig unter Kontrolle bringen sowie vollständig ablöschen.", "Aufgrund des Einsatzstichwortes waren zusätzlich … alarmiert worden. … mussten diese Kräfte nicht tätig werden."
+- Typische Formulierungen der Pressesprecher: "Beim Eintreffen an der Einsatzstelle bestätigte sich die gemeldete Lage." (nur wenn so angegeben), "… stand in Vollbrand.", "Umgehend wurde die Brandbekämpfung mittels eines C-Rohres eingeleitet.", "Zwei Trupps unter Atemschutz gingen zur Brandbekämpfung vor und konnten das Feuer zügig unter Kontrolle bringen sowie vollständig ablöschen.", "Aufgrund des Einsatzstichwortes waren zusätzlich … alarmiert worden. … mussten diese Kräfte nicht tätig werden."
 - Diese Wörter NICHT verwenden: "Vorfall", "Feuer in voller Ausdehnung" (stattdessen "brannte in voller Ausdehnung" / "stand in Vollbrand"), "Einsatzgeschehen", "Brandereignis", "Schadenslage", "erfolgreich" bei Maßnahmen.
 - Danach ein roter Faden in 3 bis 4 Absätzen, in der Reihenfolge der Lagebeschreibung: Lage beim Eintreffen (was brannte bzw. was vorgefunden wurde) → sofortige Maßnahmen ("Umgehend wurde die Brandbekämpfung eingeleitet." bzw. "Umgehend wurde die Menschenrettung eingeleitet.") → Löschangriff → Nachlöscharbeiten → Personen → Abschluss.
 - Das AAO-Stichwort beschreibt nur die Alarmierung. Was tatsächlich brannte, steht in der Lagebeschreibung ("Es brannte: …"). Niemals Formulierungen wie "eine Garage beziehungsweise ein Schuppen". Ist nichts angegeben, neutral bleiben ("Beim Eintreffen der ersten Kräfte war eine starke Rauchentwicklung sichtbar.").
@@ -45,7 +45,7 @@ Aufbau und Stil (orientiert an den bisherigen Berichten der Pressesprecher):
 - Schluss sachlich, z. B. "Nach rund zwei Stunden konnte der Einsatz beendet werden." – nur mit vorhandenen Angaben, sonst "Anschließend konnte der Einsatz beendet werden."
 - Rettungsdienst und Polizei kurz erwähnen, wenn angegeben; Rettungshubschrauber mit Namen.
 - Sachlich, ruhig, gut lesbar, abwechslungsreich. Keine Hashtags, keine Emojis, keine Unterschrift.
-- Länge: 1.850 bis 2.100 Zeichen, niemals mehr als 2.200 Zeichen.`,
+- Länge: höchstens 2.100 Zeichen, niemals mehr als 2.200 – bei kleinen Einsätzen gern kürzer.`,
   beispiele: `Am Sonntagabend wurden wir um 19:50 Uhr mit dem Einsatzstichwort „F2_Fahrzeug“ in den Stadtteil Laxten auf den Parkplatz eines Verbrauchermarktes alarmiert.
 
 Beim Eintreffen an der Einsatzstelle bestätigte sich die gemeldete Lage. Ein PKW brannte, eine starke Rauchentwicklung war sichtbar. Umgehend wurde die Brandbekämpfung eingeleitet. Ein Trupp unter Atemschutz ging mit einem C-Rohr zur Brandbekämpfung vor, wodurch eine weitere Ausbreitung des Feuers verhindert werden konnte. Im weiteren Einsatzverlauf wurde zusätzlich Netzmittel eingesetzt.
@@ -119,7 +119,7 @@ function newForm() {
     datum: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     uhrzeit: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     code: "", klartext: "", ort: "", adresse: "", besonderheiten: "",
-    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [],
+    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [], keineWeiteren: false,
     beteiligte: [], ausschreiben: false, fzNennen: false
   };
 }
@@ -456,10 +456,10 @@ function viewNeu(main) {
   const s1 = st ? `${st.code}${f.code2 ? " → " + f.code2 : ""}${f.ort ? " · " + f.ort : ""} · ${deDate(f.datum)} ${f.uhrzeit}` : "";
   const s2 = d.lead ? d.lead.name + (d.eigen ? "" : " (auswärts)") : "";
   const andere = f.beteiligte.filter(b => !b.lead);
-  const s3 = andere.length ? andere.map(b => b.name.replace("Feuerwehr ", "")).join(", ") : "";
+  const s3 = andere.length ? andere.map(b => b.name.replace("Feuerwehr ", "")).join(", ") : f.keineWeiteren ? "Keine weiteren Kräfte" : "";
   const s4 = nPunkte ? `${nPunkte} Stichpunkt${nPunkte > 1 ? "e" : ""}` : "";
   const leadIdx = f.beteiligte.findIndex(b => b.lead);
-  const done = { 1: !stepFehlt(1, f).length, 2: !!d.lead, 3: andere.length > 0 && !stepFehlt(3, f).length, 4: nPunkte > 0 };
+  const done = { 1: !stepFehlt(1, f).length, 2: !!d.lead, 3: (andere.length > 0 || !!f.keineWeiteren) && !stepFehlt(3, f).length, 4: nPunkte > 0 };
   S.maxStep = Math.max(S.maxStep || 1, S.step || 1);
 
   const body1 = `<div class="grid2">
@@ -488,6 +488,7 @@ function viewNeu(main) {
   const body3 = `<p class="hint">Weitere Ortsfeuerwehren, Rettungsdienst oder Polizei hinzufügen – jeweils mit ihren Fahrzeugen.</p>
     ${f.beteiligte.map((b, i) => b.lead ? "" : wehrCard(b, i)).join("")}
     <div class="chips">${quickAdd}${["Rettungsdienst", "Polizei"].filter(n => !present.has(n)).map(n => `<button type="button" class="chip small ghost add" data-act="addwehr" data-name="${n}">+ ${n}</button>`).join("")}</div>
+    ${andere.length ? "" : `<div class="keine"><button type="button" class="chip keine-btn ${f.keineWeiteren ? "on" : ""}" data-act="keine" aria-pressed="${!!f.keineWeiteren}">${f.keineWeiteren ? "✓ " : ""}Keine weiteren Kräfte</button></div>`}
     <div class="picker" data-picker="add">
       <input type="search" placeholder="Weitere Feuerwehr, Rettungsdienst, Polizei …" data-search="add" autocomplete="off"><div class="picklist hidden"></div>
     </div>
@@ -869,7 +870,7 @@ function buildPrompt(f) {
   if (/gemeldete lage best[äa]tigte sich/i.test(f.besonderheiten))
     lines.push(`- Gemeldete Lage laut Alarmierung: ${kt}. Sie hat sich bestätigt – deshalb direkt danach in einem eigenen Satz konkret beschreiben, was vorgefunden wurde (z. B. bei „Person im Wasser“: „Eine Person befand sich im Wasser.“). Enthält die Angabe ein „/“, nur den Teil nennen, der durch die Lagebeschreibung belegt ist, sonst allgemein bleiben – niemals „beziehungsweise“.`);
   else
-    lines.push(`- Alarmstichwort im Klartext: ${kt} (nur zur Einordnung – beschreibt nicht sicher, was tatsächlich vorgefunden wurde; nicht mit „beziehungsweise“ übernehmen)`);
+    lines.push(`- Alarmstichwort im Klartext: ${kt} (nur zur Einordnung – beschreibt nicht sicher, was tatsächlich vorgefunden wurde; nicht mit „beziehungsweise“ übernehmen). NICHT schreiben, dass sich die gemeldete Lage bestätigte – direkt beschreiben, was vorgefunden bzw. getan wurde.`);
   lines.push(`- Einsatzart: ${st?.art || "unbekannt"}`);
   lines.push(f.ort.trim() ? `- Einsatzort (nur diesen Ort nennen): ${f.ort.trim()}` : "- Einsatzort: nicht angegeben – keinen Ort nennen");
   lines.push(`- Einsatzführende Feuerwehr: ${d.lead.name}`);
@@ -907,8 +908,8 @@ function buildPrompt(f) {
     ? "- Fahrzeuge: nur wie oben erlaubt und allgemeinverständlich (z. B. „mit einem Löschfahrzeug“, „mit der Drehleiter“). Keine Kürzel, keine Listen."
     : "- Fahrzeuge: KEINE einzelnen Fahrzeuge nennen – weder Typen noch Kürzel. Nur die Feuerwehren nennen.");
   const LAENGE = `Länge und Form (verbindlich):
-- Ziel: 1.850 bis 2.100 Zeichen inklusive Leerzeichen, auf keinen Fall mehr als 2.200 Zeichen.
-- Ausführlich und flüssig erzählen: Abläufe genauer beschreiben, Zusammenhänge erklären und allgemeines Feuerwehrwissen einbinden (z. B. warum eine Wärmebildkamera oder ein Überdrucklüfter eingesetzt wird). Aber KEINE neuen Fakten zu diesem Einsatz erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge oder Zeiten).
+- Höchstens 2.100 Zeichen inklusive Leerzeichen, niemals mehr als 2.200. Das ist eine Obergrenze, kein Ziel: Bei wenigen Stichpunkten darf und soll der Bericht deutlich kürzer sein. Ausführlich wird er nur durch echte Angaben.
+- Flüssig erzählen. Eine kurze Erklärung (höchstens ein Satz) ist nur erlaubt, wenn sie direkt zu einer angegebenen Maßnahme gehört (z. B. warum eine Wärmebildkamera eingesetzt wurde). KEINE allgemeinen Füllsätze über die Aufgaben der Feuerwehr, Bedeutung von Einsätzen, besonnenes Vorgehen o. Ä. KEINE neuen Fakten erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge, Zeiten oder Tätigkeiten).
 - Gründe und Absichten nicht ausschmücken (z. B. nicht „um weitere Kräfte für eine drohende Brandausbreitung bereitzustellen“), nur die angegebenen Gründe nennen.
 - Den Bericht immer vollständig zu Ende schreiben.
 - Einzahl und Mehrzahl genau übernehmen: Ist von einer Person die Rede, niemals „Personen“ schreiben (z. B. „aufgrund einer vermissten Person“).
@@ -923,7 +924,9 @@ Formulierungsregeln (verbindlich):
 - Verletzte knapp zusammenfassen, z. B. „Eine Person wurde leicht verletzt, eine weitere schwer.“
 - Verstorbene Personen sachlich und zurückhaltend erwähnen, ohne Einzelheiten, z. B. „Für eine Person kam leider jede Hilfe zu spät.“ Keine Spekulationen, keine Umstände, keine Gefühlsbeschreibungen; danach im Bericht keinen lockeren Ton.
 - Die Gesamtzahl der Fahrzeuge (falls angegeben) dort nennen, wo die beteiligten Kräfte genannt werden – nicht zwischen Verletzten und Einsatzende.
-- Verboten: „Nach dem Ende aller Arbeiten“, „bei den Maßnahmen eingebunden“, „diese spezielle Technik“, „Schutzabstand“.
+- „Beim Eintreffen bestätigte sich die gemeldete Lage“ nur schreiben, wenn der Stichpunkt „Gemeldete Lage bestätigte sich“ angegeben ist.
+- Rettungsdienst, Polizei und andere Organisationen nur als anwesend nennen (z. B. „Ebenfalls vor Ort waren der Rettungsdienst und die Polizei.“). Was sie getan haben, NUR schreiben, wenn es als Stichpunkt angegeben ist. Bei Verletzten genügt „… an den Rettungsdienst übergeben“; Erstversorgung, Betreuung oder Transport nur, wenn angegeben. Immer einfach „der Rettungsdienst“ – nie „medizinisches Fachpersonal“ o. Ä.
+- Verboten: „Nach dem Ende aller Arbeiten“, „bei den Maßnahmen eingebunden“, „diese spezielle Technik“, „Schutzabstand“, „Hand in Hand“, „medizinisches Fachpersonal“, „von zentraler Bedeutung“, „Zusammenarbeit verlief reibungslos“.
 - Wortwiederholungen vermeiden, besonders „eingeleitet“, „Personen“ und „Einsatzstelle“; Satzanfänge abwechseln.`;
   let p = `${S.ki.stil}\n\n${HARD_RULES}\n\n${LAENGE}\n\n${lines.join("\n")}`;
   if ((S.ki.beispiele || "").trim()) p += `\n\nBEISPIELBERICHTE (nur für Stil und Aufbau, keine Inhalte übernehmen):\n${S.ki.beispiele.trim()}`;
@@ -959,7 +962,7 @@ async function generate() {
       text = (r.response.text() || "").trim().replace(/^```[a-z]*\n?|```$/g, "").trim();
       // Abgeschnittene Antwort erkennen (Token-Limit / Abbruch) → neu versuchen bzw. nächstes Modell
       const fin = r.response.candidates?.[0]?.finishReason;
-      const unvollstaendig = t => !t || fin === "MAX_TOKENS" || !/[.!?“"»)]\s*$/.test(t) || [...t].length < 400;
+      const unvollstaendig = t => !t || fin === "MAX_TOKENS" || !/[.!?“"»)]\s*$/.test(t) || [...t].length < 180;
       if (unvollstaendig(text)) {
         console.warn("KI-Text unvollständig", m, fin, text.slice(-40));
         if (!teilText || [...text].length > [...teilText].length) teilText = text;
@@ -1266,7 +1269,7 @@ const ACT = {
     if (kind === "aao2") { S.form.code2 = v; S.form.erhOpen = true; }
     if (kind === "aao" || kind === "aao2") { S.btab = ""; S.centeredTab = null; }
     if (kind === "lead") setLead(v);
-    if (kind === "add" && !S.form.beteiligte.some(b => b.name === v)) S.form.beteiligte.push({ name: v, fz: [], lead: false });
+    if (kind === "add" && !S.form.beteiligte.some(b => b.name === v)) { S.form.beteiligte.push({ name: v, fz: [], lead: false }); S.form.keineWeiteren = false; }
     render();
   },
   erhopen: () => { S.form.erhOpen = true; render(); },
@@ -1283,7 +1286,8 @@ const ACT = {
   gostep: t => { const n = +t.dataset.n; S.step = n; render(); const el = document.querySelector(`.step-card[data-step="${n}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
   clearcode: () => { S.form.code = ""; S.form.klartext = ""; render(); },
   setlead: t => { setLead(t.dataset.name); render(); },
-  addwehr: t => { if (!S.form.beteiligte.some(b => b.name === t.dataset.name)) S.form.beteiligte.push({ name: t.dataset.name, fz: [], lead: false }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  keine: () => { S.form.keineWeiteren = !S.form.keineWeiteren; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  addwehr: t => { S.form.keineWeiteren = false; if (!S.form.beteiligte.some(b => b.name === t.dataset.name)) S.form.beteiligte.push({ name: t.dataset.name, fz: [], lead: false }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   removewehr: t => { S.form.beteiligte.splice(+t.dataset.i, 1); render(); },
   togglefz: t => { const b = S.form.beteiligte[+t.dataset.i], v = t.dataset.v; b.fz = b.fz.includes(v) ? b.fz.filter(x => x !== v) : [...b.fz, v]; render(); },
   resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; render(); } },

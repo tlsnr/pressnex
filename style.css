@@ -310,3 +310,7 @@ button:focus-visible{outline:3px solid var(--red-line);outline-offset:2px}
 .sp-lbl .l-long{display:none}
 @media (min-width:560px){.sp-lbl .l-long{display:inline}.sp-lbl .l-short{display:none}}
 .bchips .chip,.erk-chips .chip{text-align:left;justify-content:flex-start}
+/* Keine weiteren Kräfte – abgesetzt */
+.keine{border-top:1px solid var(--line);padding-top:12px;display:flex;justify-content:flex-end}
+.keine-btn{background:#F1F5F9;border-color:#E2E8F0;color:var(--ink2);font-weight:600}
+.keine-btn.on{background:var(--ok);border-color:var(--ok);color:#fff;box-shadow:0 4px 12px rgba(4,120,87,.25)}
