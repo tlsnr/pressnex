@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-0830";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1400";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -119,7 +119,7 @@ function newForm() {
     datum: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     uhrzeit: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     code: "", klartext: "", ort: "", adresse: "", besonderheiten: "",
-    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false,
+    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [],
     beteiligte: [], ausschreiben: false, fzNennen: false
   };
 }
@@ -130,6 +130,7 @@ const ERH_GRUENDE = [
   "Lageerkundung durch ersteintreffende Kräfte",
   "Rückmeldung eines bereits eingetroffenen Rettungswagens",
   "Rückmeldung der Polizei vor Ort",
+  "Hinweis, dass sich noch Personen im Gebäude befinden sollen",
   "Vermisste Person",
   "Mehrere vermisste Personen",
   "Großes Suchgebiet",
@@ -447,6 +448,7 @@ function viewNeu(main) {
     <button type="button" class="btn next" data-act="nextstep" data-n="4">Weiter</button>`;
 
   const body4 = `${bausteinPanel(f)}
+    <div id="rqbox">${rueckfragenHtml(f)}</div>
     <textarea id="lage" data-bind="besonderheiten" rows="6" placeholder="Stichpunkte antippen oder selbst schreiben – die KI erfindet nichts dazu.">${esc(f.besonderheiten)}</textarea>
     <label class="check"><input type="checkbox" data-bind="fzNennen" ${f.fzNennen ? "checked" : ""}> Fahrzeuge im Bericht erwähnen <span class="hint inline">(sonst nur die Feuerwehren)</span></label>`;
 
@@ -488,24 +490,155 @@ function viewNeu(main) {
 
 function autoTab(f) {
   const st = aaoByCode(f.code); if (!st) return "Was brennt";
-  if (/X/.test(st.block) || /gefahr|gas/i.test(st.klartext)) return "Gefahrgut";
+  if (/X/.test(st.block)) return "Gefahrgut";
   if (/BMA|RWM|Erkundung|Nachschau/i.test(st.code)) return "Lage";
   if (st.art === "Brand") return "Was brennt";
+  if (/gefahrgut|\bgas/i.test(st.klartext)) return "Gefahrgut";
   if (st.art === "MANV") return "Personen";
   if (st.art === "Hilfeleistung") return "Technische Hilfe";
   return "Lage";
 }
+// ---- Stichpunkt-Vorlagen: [#] = Zahl, {Einzahl|Mehrzahl}, [Feld] = Freitext, „|Frage?“ am Ende ----
+function tplSplit(p) {
+  let depth = 0;
+  for (let i = p.length - 1; i >= 0; i--) {
+    const c = p[i];
+    if (c === "}") depth++; else if (c === "{") depth--;
+    else if (c === "|" && depth === 0) return { t: p.slice(0, i).trim(), q: p.slice(i + 1).trim() };
+  }
+  return { t: p, q: "" };
+}
+const TPL_TOK = /(\[#\]|\[[^\]]+\]|\{[^}]*\})/;
+const tplHasVars = t => /\[[^\]]+\]/.test(t);
+const tplLabel = t => t.replace(/\[#\]/g, "…").replace(/\{[^|}]*\|([^}]*)\}/g, "$1").replace(/\[[^\]]+\]/g, "…");
+const reEsc = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const tplCache = new Map();
+function tplRegex(t) {
+  if (tplCache.has(t)) return tplCache.get(t);
+  const src = t.split(TPL_TOK).map(tok => {
+    if (tok === "[#]") return "\\d+";
+    if (/^\[[^\]]+\]$/.test(tok)) return ".+?";
+    if (/^\{[^}]*\}$/.test(tok)) return "(?:" + tok.slice(1, -1).split("|").map(reEsc).join("|") + ")";
+    return reEsc(tok);
+  }).join("");
+  const re = new RegExp("^" + src + "(?:\\s*\\(.*\\))?$", "i");
+  tplCache.set(t, re); return re;
+}
+function tplFill(t, n, free) {
+  return t.split(TPL_TOK).map(tok => {
+    if (tok === "[#]") return String(n);
+    if (/^\[[^\]]+\]$/.test(tok)) return free;
+    if (/^\{[^}]*\}$/.test(tok)) { const [a, b] = tok.slice(1, -1).split("|"); return Number(n) === 1 ? a : (b ?? a); }
+    return tok;
+  }).join("");
+}
+const lageZeilen = f => f.besonderheiten.split("\n").map(l => l.replace(/^-\s*/, "").trim()).filter(Boolean);
+const hatZeile = (f, t) => lageZeilen(f).some(l => tplRegex(t).test(l));
+function lageAdd(f, line) { const cur = f.besonderheiten.replace(/\s+$/, ""); f.besonderheiten = (cur ? cur + "\n" : "") + "- " + line; }
+function lageRemove(f, t) { const re = tplRegex(t); f.besonderheiten = f.besonderheiten.split("\n").filter(l => !re.test(l.replace(/^-\s*/, "").trim())).join("\n"); }
+function lageReplace(f, t, neu) { const re = tplRegex(t); f.besonderheiten = f.besonderheiten.split("\n").map(l => re.test(l.replace(/^-\s*/, "").trim()) ? "- " + neu : l).join("\n"); }
+function tplFind(t) {
+  for (const tab of (S.stamm.bausteine || [])) for (const p of tab.punkte) {
+    const { t: tt, q } = tplSplit(p); if ((tab.prefix || "") + tt === t) return { t, q };
+  }
+  return { t, q: "" };
+}
+function openTpl(t, q) {
+  const num = t.includes("[#]"), zeit = /\[uhrzeit\]/i.test(t);
+  const frage = q || (num ? "Wie viele?" : "Bitte ergänzen:");
+  S.pendingTpl = t;
+  S.modal = `<div class="sheet-head"><h2>${esc(frage)}</h2><button class="iconbtn" data-act="closemodal" aria-label="Schließen">${ICON.x}</button></div>
+    <p class="hint">${esc(tplLabel(t))}</p>
+    ${num ? `<div class="qnums">${[1, 2, 3, 4, 5, 6].map(n => `<button type="button" class="chip qn" data-act="qnum" data-n="${n}">${n}</button>`).join("")}</div>` : ""}
+    <div class="row qfree"><input id="qfree" type="${zeit ? "time" : num ? "number" : "text"}" ${num ? 'inputmode="numeric" min="1" placeholder="andere Zahl"' : 'placeholder="eingeben"'}>
+    <button type="button" class="btn primary" data-act="qok">Übernehmen</button></div>`;
+  render();
+  if (!num) setTimeout(() => $("#qfree")?.focus(), 50);
+}
+function tplCommit(val) {
+  const t = S.pendingTpl, f = S.form; if (!t || val === "" || val == null) return;
+  const v = String(val).trim(); if (!v) return;
+  if (t.includes("[#]") && !(Number(v) > 0)) return;
+  const line = tplFill(t, t.includes("[#]") ? Number(v) : v, v);
+  if (S.pendingReplace) { lageReplace(f, S.pendingReplace, line); S.pendingReplace = null; }
+  else lageAdd(f, line);
+  S.pendingTpl = null; S.modal = null; saveDraft(); askNew();
+  const y = window.scrollY; render(); window.scrollTo(0, y);
+  const ta = $("#lage"); if (ta) ta.scrollTop = ta.scrollHeight;
+}
+
 function bausteinPanel(f) {
   const tabs = S.stamm.bausteine || DEFAULT_STAMM.bausteine || [];
   if (!tabs.length) return "";
   const cur = tabs.find(t => t.reiter === (S.btab || autoTab(f))) || tabs[0];
   S.curTab = cur.reiter;
-  const used = f.besonderheiten.toLowerCase();
+  const zeilen = lageZeilen(f);
   return `<div class="btabs" role="tablist">${tabs.map(t => `<button type="button" role="tab" aria-selected="${t === cur}" class="btab ${t === cur ? "on" : ""}" data-act="btab" data-v="${esc(t.reiter)}">${esc(t.reiter)}</button>`).join("")}</div>
     <div class="bchips">${cur.punkte.map(p => {
       if (p.startsWith("## ")) return `<div class="bgroup">${esc(p.slice(3))}</div>`;
-      const txt = (cur.prefix || "") + p.replace(/[\[\]]/g, ""); const on = used.includes(txt.toLowerCase());
-      return `<button type="button" class="chip small ${on ? "on" : ""}" data-act="baustein" data-v="${esc(txt)}">${on ? "✓ " : ""}${esc(p.replace(/[\[\]]/g, ""))}</button>`; }).join("")}</div>`;
+      const { t, q } = tplSplit(p);
+      const full = (cur.prefix || "") + t, re = tplRegex(full);
+      const hit = zeilen.find(l => re.test(l));
+      const label = hit && tplHasVars(t) ? hit.slice((cur.prefix || "").length) : tplLabel(t);
+      return `<button type="button" class="chip small ${hit ? "on" : ""}${tplHasVars(t) && !hit ? " ask" : ""}" data-act="baustein" data-v="${esc(full)}" data-q="${esc(q)}">${hit ? "✓ " : ""}${esc(label)}</button>`; }).join("")}</div>`;
+}
+
+// ---- Rückfragen im Hintergrund (regelbasiert, ohne KI-Kontingent) ----
+function rueckfragen(f) {
+  const out = [], skip = f.skipQ || [], z = lageZeilen(f), has = rx => z.some(l => rx.test(l));
+  const add = (id, frage, opts, info = "") => { if (!skip.includes(id)) out.push({ id, frage, opts, info }); };
+  const brennt = z.filter(l => /^es brannte:\s*/i.test(l)).map(l => l.replace(/^es brannte:\s*/i, "").trim());
+  if (brennt.length >= 2 && z.some(l => /^brannte bereits in voller ausdehnung$/i.test(l)))
+    add("vollAus", "Was brannte bereits in voller Ausdehnung?",
+      [...brennt.map(b => ({ label: b, act: "qrepl", t: "Brannte bereits in voller Ausdehnung", line: `Brannte bereits in voller Ausdehnung (${b})` })),
+       { label: "Alles", act: "qrepl", t: "Brannte bereits in voller Ausdehnung", line: "Brannte bereits in voller Ausdehnung (alle genannten Objekte)" }]);
+  if (has(/^umgehend menschenrettung eingeleitet$/i) && !z.some(l => /gerettet/i.test(l) && !/haustier|tier /i.test(l)))
+    add("rettWie", "Wie wurden die Personen gerettet?", [
+      { label: "Über die Drehleiter", act: "qtpl", t: "[#] {Person|Personen} über die Drehleiter gerettet" },
+      { label: "Über tragbare Leitern", act: "qtpl", t: "[#] {Person|Personen} über tragbare Leitern gerettet" },
+      { label: "Durch den Angriffstrupp", act: "qtpl", t: "[#] {Person|Personen} durch den Angriffstrupp aus dem Gebäude gerettet" }]);
+  if (has(/^innenangriff unter atemschutz$/i) && !has(/trupps? unter atemschutz/i))
+    add("trupps", "Wie viele Trupps gingen unter Atemschutz vor?",
+      [1, 2, 3, 4].map(n => ({ label: String(n), act: "qline", line: tplFill("[#] {Trupp|Trupps} unter Atemschutz zur Brandbekämpfung vorgegangen", n) })));
+  if (has(/^messungen durchgeführt$/i) && !has(/^messungen (verliefen|ergaben)/i))
+    add("mess", "Was ergaben die Messungen?", [
+      { label: "Negativ", act: "qline", line: "Messungen verliefen negativ" },
+      { label: "Erhöhte Werte", act: "qline", line: "Messungen ergaben erhöhte Werte" }]);
+  if (has(/^feuer drohte auf ein nachbargebäude überzugreifen$/i) && !has(/riegelstellung|weitere ausbreitung verhindert/i))
+    add("riegel", "Konnte ein Übergreifen verhindert werden?", [
+      { label: "Riegelstellung aufgebaut", act: "qline", line: "Riegelstellung zum Nachbargebäude aufgebaut" },
+      { label: "Ausbreitung verhindert", act: "qline", line: "Weitere Ausbreitung verhindert" }]);
+  if (f.code2 && !f.erhWann)
+    add("erhWann", "Wann wurde das Stichwort erhöht?", [
+      { label: "Auf der Anfahrt", act: "qset", k: "erhWann", v: "auf der Anfahrt" },
+      { label: "Vor Ort", act: "qset", k: "erhWann", v: "vor Ort" }]);
+  if (autoTab(f) === "Was brennt" && z.length >= 2 && !brennt.length && S.curTab !== "Was brennt")
+    { add("wasBrennt", "Was hat gebrannt?", [{ label: "Zu „Was brennt“", act: "qtab", v: "Was brennt" }], "Ohne Angabe bleibt der Bericht beim Brandobjekt allgemein."); if (out.length) out[out.length - 1].noPop = true; }
+  return out;
+}
+// Neue Rückfrage direkt beim Antippen als Fenster zeigen (jede nur einmal); offene bleiben als Karte stehen
+function askNew() {
+  if (S.modal) return;
+  S.qShown = S.qShown || new Set();
+  const qs = rueckfragen(S.form);
+  const q = qs.find(x => !x.noPop && !S.qShown.has(x.id));
+  qs.forEach(x => S.qShown.add(x.id));
+  if (!q) return;
+  S.qModal = q;
+  S.modal = `<div class="sheet-head"><h2>${esc(q.frage)}</h2><button class="iconbtn" data-act="closemodal" aria-label="Später">${ICON.x}</button></div>
+    ${q.info ? `<p class="hint">${esc(q.info)}</p>` : ""}
+    <div class="qopts">${q.opts.map((o, j) => `<button type="button" class="chip qo" data-act="qopt" data-m="1" data-j="${j}">${esc(o.label)}</button>`).join("")}</div>
+    <button type="button" class="btn ghost full" data-act="qskip" data-v="${esc(q.id)}">Weiß nicht / überspringen</button>`;
+}
+function rueckfragenHtml(f) {
+  const qs = rueckfragen(f);
+  if (!qs.length) return "";
+  S.qOpts = qs;
+  return `<div class="rq">${qs.map((q, i) => `<div class="rq-item">
+    <div class="rq-head"><span class="rq-ico">?</span><strong>${esc(q.frage)}</strong></div>
+    ${q.info ? `<p class="hint">${esc(q.info)}</p>` : ""}
+    <div class="chips">${q.opts.map((o, j) => `<button type="button" class="chip small" data-act="qopt" data-i="${i}" data-j="${j}">${esc(o.label)}</button>`).join("")}
+    <button type="button" class="chip small ghost" data-act="qskip" data-v="${esc(q.id)}">Weiß nicht / überspringen</button></div></div>`).join("")}</div>`;
 }
 function wehrCard(b, i) {
   const own = S.stamm.eigeneFahrzeuge[b.name] || [];
@@ -613,10 +746,10 @@ function fzText(v, aus) { return aus ? v : fzAllgemein(v); }
 function sortiereLage(txt) {
   const tabs = S.stamm.bausteine || [];
   const idx = line => {
-    const l = line.replace(/^-\s*/, "").trim().toLowerCase().replace(/\d+/g, "#");
+    const l = line.replace(/^-\s*/, "").trim();
     for (let i = 0; i < tabs.length; i++) for (let j = 0; j < tabs[i].punkte.length; j++) {
-      const q = ((tabs[i].prefix || "") + tabs[i].punkte[j].replace(/[\[\]]/g, "")).toLowerCase().replace(/\d+/g, "#");
-      if (q === l) return i * 1000 + j;
+      const p = tabs[i].punkte[j]; if (p.startsWith("## ")) continue;
+      if (tplRegex((tabs[i].prefix || "") + tplSplit(p).t).test(l)) return i * 1000 + j;
     }
     return -1;
   };
@@ -650,7 +783,9 @@ function buildPrompt(f) {
   lines.push(`- Datum: ${weekday(f.datum)}, ${deDate(f.datum)}`);
   lines.push(`- Alarmierung: ${f.uhrzeit} Uhr, also ${tagesPhrase(f.datum, f.uhrzeit)}`);
   const so = sonne(f.datum);
-  if (so) {
+  const dunkelThema = /dunkel/i.test(f.besonderheiten + " " + f.erhGruende.join(" ") + " " + f.erhFrei);
+  if (!dunkelThema) lines.push("- Lichtverhältnisse: NICHT erwähnen (keine Dunkelheit, keine Ausleuchtung, keine Tageslicht-Hinweise).");
+  else if (so) {
     const a = minuten(f.uhrzeit), u = minuten(so.unter), sa = minuten(so.auf);
     const licht = a >= sa + 30 && a <= u - 30 ? "es war hell" : a > u - 30 && a <= u + 45 ? "die Dunkelheit brach gerade herein" : a > sa - 45 && a < sa + 30 ? "es dämmerte gerade" : "es war bereits dunkel";
     lines.push(`- Lichtverhältnisse in Lingen: Sonnenuntergang ${so.unter} Uhr, Sonnenaufgang ${so.auf} Uhr → zur Alarmzeit: ${licht}. „Einbruch der Dunkelheit“ nur verwenden, wenn die Dunkelheit gerade hereinbrach; sonst „aufgrund der Dunkelheit“ bzw. bei Helligkeit gar nicht erwähnen.`);
@@ -659,7 +794,9 @@ function buildPrompt(f) {
   if (f.code2) {
     const st2 = aaoByCode(f.code2);
     const gr = [...f.erhGruende, f.erhFrei.trim()].filter(Boolean);
-    lines.push(`- Stichworterhöhung${f.erhWann ? " " + f.erhWann : ""} auf „${f.code2}“ (${st2?.klartext || f.code2})${gr.length ? ", Grund: " + gr.join("; ") : ""}. Im ersten Satz NUR mit dem Grundstichwort alarmieren; die Erhöhung im zweiten Satz beschreiben, z. B. „${f.erhWann === "vor Ort" ? "Vor Ort" : "Bereits auf der Anfahrt"} wurde das Einsatzstichwort ${gr.length ? "aufgrund … " : ""}auf „${f.code2}“ erhöht.“ Danach die Lage schildern.`);
+    lines.push(`- Stichworterhöhung${f.erhWann ? " " + f.erhWann : ""} auf „${f.code2}“ (${st2?.klartext || f.code2})${gr.length ? ", Grund: " + gr.join("; ") : ""}. Im ersten Satz NUR mit dem Grundstichwort alarmieren. ${f.erhWann === "vor Ort"
+      ? `Reihenfolge: Alarmierung → Eintreffen und vorgefundene Lage → Erhöhung (z. B. „Aufgrund … wurde das Einsatzstichwort daraufhin auf „${f.code2}“ erhöht.“). Das Eintreffen nur EINMAL beschreiben – danach kein zweites „Beim Eintreffen …“ und kein nachgeschobenes „Die gemeldete Lage bestätigte sich“. War die Lage ernster als gemeldet, genau das sagen.`
+      : `Die Erhöhung im zweiten Satz beschreiben, z. B. „Bereits auf der Anfahrt wurde das Einsatzstichwort ${gr.length ? "aufgrund … " : ""}auf „${f.code2}“ erhöht.“ Danach die Lage beim Eintreffen schildern, das Eintreffen nur einmal erwähnen.`} Gründe als Information formulieren (z. B. „da sich laut Hinweisen noch Personen im Gebäude befinden sollten“).`);
   }
   const kt = f.klartext || st?.klartext || f.code;
   if (/gemeldete lage best[äa]tigte sich/i.test(f.besonderheiten))
@@ -708,7 +845,19 @@ function buildPrompt(f) {
 - Gründe und Absichten nicht ausschmücken (z. B. nicht „um weitere Kräfte für eine drohende Brandausbreitung bereitzustellen“), nur die angegebenen Gründe nennen.
 - Den Bericht immer vollständig zu Ende schreiben.
 - Einzahl und Mehrzahl genau übernehmen: Ist von einer Person die Rede, niemals „Personen“ schreiben (z. B. „aufgrund einer vermissten Person“).
-- Bekannte Einheiten mit bestimmtem Artikel: „die Rettungshundestaffel“, „die DLRG“, „der Polizeihubschrauber“.`;
+- Bekannte Einheiten mit bestimmtem Artikel: „die Rettungshundestaffel“, „die DLRG“, „der Polizeihubschrauber“.
+
+Formulierungsregeln (verbindlich):
+- Menschenrettung und Brandbekämpfung laufen gleichzeitig: „Parallel dazu …“ statt „im Anschluss“ oder „danach“.
+- Niemals erfinden, WIE Personen gerettet wurden (Drehleiter, tragbare Leitern, Angriffstrupp) oder wie viele Trupps, Strahlrohre oder Einsatzkräfte vorgingen. Steht es nicht in den Stichpunkten, allgemein bleiben.
+- „Brannte in voller Ausdehnung“ nur für das Objekt verwenden, das in den Stichpunkten genannt ist; ist nichts genannt, allgemein bleiben.
+- Lichtverhältnisse, Dunkelheit oder Ausleuchtung nur erwähnen, wenn sie ausdrücklich angegeben sind.
+- Erklärungen kurz und natürlich, z. B. „Durch die Riegelstellung sollte ein Übergreifen der Flammen und der Hitzestrahlung auf das Nachbargebäude verhindert werden.“ Nicht „diese spezielle Technik“, nicht „Schutzabstand“.
+- Verletzte knapp zusammenfassen, z. B. „Eine Person wurde leicht verletzt, eine weitere schwer.“
+- Verstorbene Personen sachlich und zurückhaltend erwähnen, ohne Einzelheiten, z. B. „Für eine Person kam leider jede Hilfe zu spät.“ Keine Spekulationen, keine Umstände, keine Gefühlsbeschreibungen; danach im Bericht keinen lockeren Ton.
+- Die Gesamtzahl der Fahrzeuge (falls angegeben) dort nennen, wo die beteiligten Kräfte genannt werden – nicht zwischen Verletzten und Einsatzende.
+- Verboten: „Nach dem Ende aller Arbeiten“, „bei den Maßnahmen eingebunden“, „diese spezielle Technik“, „Schutzabstand“.
+- Wortwiederholungen vermeiden, besonders „eingeleitet“, „Personen“ und „Einsatzstelle“; Satzanfänge abwechseln.`;
   let p = `${S.ki.stil}\n\n${HARD_RULES}\n\n${LAENGE}\n\n${lines.join("\n")}`;
   if ((S.ki.beispiele || "").trim()) p += `\n\nBEISPIELBERICHTE (nur für Stil und Aufbau, keine Inhalte übernehmen):\n${S.ki.beispiele.trim()}`;
   return p;
@@ -940,7 +1089,7 @@ function capitalizeWehr(q) { const t = q.trim().replace(/\b\w/g, c => c.toUpperC
 /* ---------- Ereignisse ---------- */
 document.addEventListener("input", e => {
   const t = e.target;
-  if (t.dataset.bind) { S.form[t.dataset.bind] = t.type === "checkbox" ? t.checked : t.value; saveDraft(); return; }
+  if (t.dataset.bind) { S.form[t.dataset.bind] = t.type === "checkbox" ? t.checked : t.value; saveDraft(); if (t.dataset.bind === "besonderheiten") { const rb = $("#rqbox"); if (rb) rb.innerHTML = rueckfragenHtml(S.form); } return; }
   if (t.dataset.bindResult && S.result) { S.result.text = t.value; const c = $("#cc"); if (c) c.innerHTML = counter(t.value); saveDraft(); return; }
   if (t.dataset.search) {
     const box = t.parentElement.querySelector(".picklist");
@@ -1081,12 +1230,26 @@ const ACT = {
   btab: t => { S.btab = t.dataset.v; S.btabCenter = true; S.bchipScroll = 0; render(); },
   baustein: t => {
     const f = S.form, v = t.dataset.v;
-    const lines = f.besonderheiten.split("\n");
-    const idx = lines.findIndex(l => l.replace(/^-\s*/, "").trim().toLowerCase() === v.toLowerCase());
-    if (idx >= 0) { lines.splice(idx, 1); f.besonderheiten = lines.join("\n"); }
-    else { const cur = f.besonderheiten.replace(/\s+$/, ""); f.besonderheiten = (cur ? cur + "\n" : "") + "- " + v; }
+    if (hatZeile(f, v)) lageRemove(f, v);
+    else if (tplHasVars(v)) { S.pendingReplace = null; openTpl(v, t.dataset.q); return; }
+    else lageAdd(f, v);
+    saveDraft(); askNew();
     const y = window.scrollY; render(); window.scrollTo(0, y);
     const ta = $("#lage"); if (ta) { ta.scrollTop = ta.scrollHeight; }
+  },
+  qnum: t => tplCommit(t.dataset.n),
+  qok: () => tplCommit($("#qfree")?.value),
+  qskip: t => { const f = S.form; f.skipQ = [...(f.skipQ || []), t.dataset.v]; S.modal = null; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  qopt: t => {
+    const q = t.dataset.m ? S.qModal : (S.qOpts || [])[+t.dataset.i], o = q?.opts[+t.dataset.j], f = S.form; if (!o) return;
+    S.modal = null;
+    if (o.act === "qtpl") { S.pendingReplace = null; openTpl(o.t, tplFind(o.t).q); return; }
+    if (o.act === "qline") lageAdd(f, o.line);
+    else if (o.act === "qrepl") lageReplace(f, o.t, o.line);
+    else if (o.act === "qset") f[o.k] = o.v;
+    else if (o.act === "qtab") { S.btab = o.v; S.btabCenter = true; S.bchipScroll = 0; }
+    saveDraft(); askNew();
+    const y = window.scrollY; render(); window.scrollTo(0, y);
   },
   canceledit: () => { clearDraft(); S.error = ""; S.view = "archiv"; render(); },
   deletereport: async t => {
@@ -1123,3 +1286,6 @@ document.addEventListener("click", e => {
 });
 
 render();
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.id === "qfree") { e.preventDefault(); tplCommit(e.target.value); }
+});
