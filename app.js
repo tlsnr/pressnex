@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1210";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1225";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -981,6 +981,11 @@ Formulierungsregeln (verbindlich):
   return p;
 }
 
+const MODELL_NAME = { "gemini-3.8-flash": "3.8 Flash", "gemini-3.6-flash": "3.6 Flash", "gemini-3.5-flash-lite": "3.5 Flash-Lite", "gemini-3.1-flash-lite": "3.1 Flash-Lite" };
+// Tageskontingent setzt sich gegen 9 Uhr zurück → „Tag“ beginnt um 9 Uhr
+const quotaTag = () => new Date(Date.now() - 9 * 3600e3 + 3600e3).toISOString().slice(0, 10);
+function quotaLeer() { try { const q = JSON.parse(localStorage.getItem("pn_quota") || "{}"); return q.tag === quotaTag() ? q.models || [] : []; } catch { return []; } }
+function quotaMerken(m) { try { const l = quotaLeer(); if (!l.includes(m)) l.push(m); localStorage.setItem("pn_quota", JSON.stringify({ tag: quotaTag(), models: l })); } catch {} }
 async function generate() {
   const errs = validate(S.form);
   if (errs.length) {
@@ -997,16 +1002,32 @@ async function generate() {
     const h = $("#kihint"); if (h && !S.busyInfo) h.textContent = wartetext();
   }, 200);
   const prompt = buildPrompt(S.form);
-  const models = [S.ki.modell, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"].filter((m, i, a) => m && a.indexOf(m) === i);
-  let text = "", lastErr = null, teilText = "";
+  const alle = [S.ki.modell, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"].filter((m, i, a) => m && a.indexOf(m) === i);
+  // Modelle, deren Tageskontingent heute schon aufgebraucht ist, gleich überspringen (spart Wartezeit)
+  const leer = quotaLeer();
+  let models = alle.filter(m => !leer.includes(m)); if (!models.length) models = alle;
+  let text = "", lastErr = null, teilText = "", genutzt = "";
   for (const m of models) {
     try {
       S.busyInfo = m === models[0] ? "" : "Ich nehme einen anderen Weg, gleich geschafft …"; render();
-      const model = getGenerativeModel(ai, { model: m, generationConfig: { temperature: 0.6 } }, { timeout: 45000 });
-      const r = await Promise.race([
-        model.generateContent(prompt),
-        new Promise((_, rej) => setTimeout(() => rej(new Error("Zeitüberschreitung – die KI hat nicht innerhalb von 50 Sekunden geantwortet.")), 50000))
-      ]);
+      const letztes = m === models.at(-1), limit = letztes ? 45000 : 25000;
+      // Weniger „Nachdenken“ bei den Flash-Modellen → schneller; Lite-Modelle denken ohnehin kaum
+      const denken = /flash$/.test(m) && !S.ohneDenken?.[m];
+      const model = getGenerativeModel(ai, { model: m, generationConfig: { temperature: 0.6, ...(denken ? { thinkingConfig: { thinkingLevel: "LOW" } } : {}) } }, { timeout: limit });
+      let r;
+      try {
+        r = await Promise.race([
+          model.generateContent(prompt),
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`Zeitüberschreitung – keine Antwort innerhalb von ${limit / 1000} Sekunden.`)), limit))
+        ]);
+      } catch (e) {
+        // Lehnt das Modell die Denk-Einstellung ab, einmal ohne sie versuchen
+        if (denken && /400|invalid|thinking/i.test(String(e?.message)) && !/429|quota/i.test(String(e?.message))) {
+          S.ohneDenken = { ...(S.ohneDenken || {}), [m]: true };
+          const m2 = getGenerativeModel(ai, { model: m, generationConfig: { temperature: 0.6 } }, { timeout: limit });
+          r = await Promise.race([m2.generateContent(prompt), new Promise((_, rej) => setTimeout(() => rej(new Error(`Zeitüberschreitung – keine Antwort innerhalb von ${limit / 1000} Sekunden.`)), limit))]);
+        } else throw e;
+      }
       text = (r.response.text() || "").trim().replace(/^```[a-z]*\n?|```$/g, "").trim();
       // Abgeschnittene Antwort erkennen (Token-Limit / Abbruch) → neu versuchen bzw. nächstes Modell
       const fin = r.response.candidates?.[0]?.finishReason;
@@ -1024,8 +1045,8 @@ async function generate() {
           if (k && [...k].length < [...text].length) text = k;
         } catch (e) { console.warn("Kürzen", e); }
       }
-      if (text) break;
-    } catch (e) { lastErr = e; console.warn("KI", m, e); if (/app.?check|attest|recaptcha|403/i.test(String(e?.message))) break; /* Kontingent je Modell: bei 429 einfach das nächste Modell versuchen */ }
+      if (text) { genutzt = m; break; }
+    } catch (e) { lastErr = e; console.warn("KI", m, e); if (/429|quota|exhausted/i.test(String(e?.message))) quotaMerken(m); if (/app.?check|attest|recaptcha|403/i.test(String(e?.message))) break; /* Kontingent je Modell: bei 429 einfach das nächste Modell versuchen */ }
   }
   let unvollst = false;
   if (!text && teilText) { text = teilText; unvollst = true; }
@@ -1042,7 +1063,7 @@ async function generate() {
   S.result = { text: `${text}\n\n/${S.profile.kuerzel.toLowerCase()}` };
   S.scrollResult = true;
   if (unvollst) S.error = "Die KI hat den Text nicht ganz zu Ende geschrieben. Bitte „Neu formulieren“ tippen oder das Ende selbst ergänzen.";
-  else toast(`Bericht in ${dauer} Sekunden erstellt`);
+  else toast(`Bericht in ${dauer} Sekunden erstellt · ${MODELL_NAME[genutzt] || genutzt}`);
   render();
 }
 
