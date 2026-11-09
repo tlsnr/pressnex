@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1155";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1210";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -738,7 +738,8 @@ const ALARM_OPTS = [["start", "Von Beginn"], ["erh", "Erhöhung"], ["nach", "Nac
 function wehrCard(b, i, inline) {
   const own = S.stamm.eigeneFahrzeuge[b.name] || [];
   const extra = b.fz.filter(v => !own.includes(v));
-  const chips = [...own, ...extra].map(v => `<button type="button" class="chip small ${b.fz.includes(v) ? "on" : ""}" data-act="togglefz" data-i="${i}" data-v="${esc(v)}">${b.fz.includes(v) ? "✓ " : ""}${esc(v)}</button>`).join("");
+  const chips = [...own, ...extra].map(v => { const on = b.fz.includes(v), n = (b.anz || {})[v] || 1;
+    return `<button type="button" class="chip small ${on ? "on" : ""}${zaehlbar(b, v) && !on ? " ask" : ""}" data-act="togglefz" data-i="${i}" data-v="${esc(v)}">${on ? "✓ " : ""}${on && zaehlbar(b, v) ? n + "× " : ""}${esc(v)}</button>`; }).join("");
   const opts = S.stamm.fahrzeuge.filter(f => !own.includes(f.kurz) && !b.fz.includes(f.kurz)).map(f => `<option value="${esc(f.kurz)}">${esc(f.kurz)} – ${esc(f.lang)}</option>`).join("");
   return `<div class="wehr ${b.lead ? "lead" : ""}">
     ${inline ? "" : `<div class="wehr-head"><div><b>${esc(b.name)}</b> <span class="tag soft">${/feuerwehr/i.test(b.name) ? "unterstützt" : "vor Ort"}</span></div>
@@ -837,10 +838,16 @@ function fzGruppe(list, genau) {
   const teile = Object.entries(c).map(([t, n]) => n === 1 ? (/^(Drehleiter|Rüstwagen|Gerätewagen|Rettungshubschrauber)/.test(t) ? `${/^Drehleiter/.test(t) ? "der" : "dem"} ${t}` : `einem ${t}`) : `${zahl[n] || n} ${plural(t)}`);
   return teile.length > 1 ? teile.slice(0, -1).join(", ") + " und " + teile.at(-1) : teile[0];
 }
+const fzTyp = v => v.replace(/\s+\d.*$/, "").replace(/(?<=[A-Za-z])\d+$/, "").trim();
+const fzListe = b => b.fz.flatMap(v => Array(Math.max(1, (b.anz || {})[v] || 1)).fill(v));
+const zaehlbar = (b, v) => !/feuerwehr/i.test(b.name) && !/christoph/i.test(v);
 const fzSonder = v => /^(DLK|DL|HAB|HRB|RW|GW-?G$|GW\/G$|GW-?MESS|MZB|RTB|DEKON|RTH)/i.test(v.replace(/\s/g, "").toUpperCase());
 function fzText(v, aus) { return aus ? v : fzAllgemein(v); }
 
 // Stichpunkte in die Reihenfolge der Reiter bringen (Lage → Maßnahmen → Löschen → Nachlöschen …), eigene Zeilen bleiben an ihrem Platz
+// Bei Menschenrettung: Nebensächliches (Betriebsstoffe, Reinigung) ans Ende
+const LEBEN_RE = /eingeklemmt|eingeschlossen|menschenrettung|gerettet|person im wasser|vermisst|verstarb/i;
+const NEBEN_RE = /betriebsstoff|abgestreut|ölspur|fahrbahn (gereinigt|blockiert)|fahrbahn$/i;
 function sortiereLage(txt) {
   const tabs = S.stamm.bausteine || [];
   const idx = line => {
@@ -852,7 +859,10 @@ function sortiereLage(txt) {
     return -1;
   };
   let last = 0;
-  const rows = txt.split("\n").filter(x => x.trim()).map((line, n) => { let i = idx(line); if (i < 0) i = last; last = i; return { line, i, n }; });
+  const all = txt.split("\n").filter(x => x.trim());
+  const leben = all.some(l => LEBEN_RE.test(l));
+  const absIdx = Math.max(0, tabs.findIndex(t => t.reiter === "Abschluss"));
+  const rows = all.map((line, n) => { let i = idx(line); if (i < 0) i = last; last = i; if (leben && NEBEN_RE.test(line)) i = absIdx * 1000 - (/abgestreut|gereinigt/i.test(line) ? 1 : 2); return { line, i, n }; });
   return rows.sort((a, b) => a.i - b.i || a.n - b.n).map(r => r.line).join("\n");
 }
 // Sonnenauf-/untergang für Lingen (Ems) – vereinfachter NOAA-Algorithmus, Ergebnis in deutscher Ortszeit
@@ -894,7 +904,7 @@ function buildPrompt(f) {
     const gr = [...f.erhGruende, f.erhFrei.trim()].filter(Boolean);
     lines.push(`- Stichworterhöhung${f.erhWann ? " " + f.erhWann : ""} auf „${f.code2}“ (${st2?.klartext || f.code2})${gr.length ? ", Grund: " + gr.join("; ") : ""}. Im ersten Satz NUR mit dem Grundstichwort alarmieren. ${f.erhWann === "vor Ort"
       ? `Reihenfolge: Alarmierung → Eintreffen und vorgefundene Lage → Erhöhung (z. B. „Aufgrund … wurde das Einsatzstichwort daraufhin auf „${f.code2}“ erhöht.“). Das Eintreffen nur EINMAL beschreiben – danach kein zweites „Beim Eintreffen …“ und kein nachgeschobenes „Die gemeldete Lage bestätigte sich“. War die Lage ernster als gemeldet, genau das sagen.`
-      : `Die Erhöhung im zweiten Satz beschreiben, z. B. „Bereits auf der Anfahrt wurde das Einsatzstichwort ${gr.length ? "aufgrund … " : ""}auf „${f.code2}“ erhöht.“ Danach die Lage beim Eintreffen schildern, das Eintreffen nur einmal erwähnen.`} Gründe als Information formulieren (z. B. „da sich laut Hinweisen noch Personen im Gebäude befinden sollten“).${f.erhGruende.includes(ERKUNDUNG) && erkundungZeilen(f).length ? ` Die Erhöhung als FOLGE der Erkundung erzählen, z. B. „Bei der Lageerkundung stellten die ersteintreffenden Kräfte fest, dass … Daraufhin wurde das Einsatzstichwort auf „${f.code2}“ erhöht.“ Festgestellt wurde: ${erkundungZeilen(f).join("; ")}. Diese Feststellungen danach nicht noch einmal wiederholen.` : ""}`);
+      : `Die Erhöhung im zweiten Satz beschreiben, z. B. „Bereits auf der Anfahrt wurde das Einsatzstichwort ${gr.length ? "aufgrund … " : ""}auf „${f.code2}“ erhöht.“ Danach die Lage beim Eintreffen schildern, das Eintreffen nur einmal erwähnen.`} Gründe als Information formulieren${gr.some(g => /Personen im Gebäude/.test(g)) ? " (z. B. „da sich laut Hinweisen noch Personen im Gebäude befinden sollten“)" : ""}.${f.erhGruende.includes(ERKUNDUNG) && erkundungZeilen(f).length ? ` Die Erhöhung als FOLGE der Erkundung erzählen, z. B. „Bei der Lageerkundung stellten die ersteintreffenden Kräfte fest, dass … Daraufhin wurde das Einsatzstichwort auf „${f.code2}“ erhöht.“ Festgestellt wurde: ${(() => { const z = erkundungZeilen(f), haupt = z.filter(l => !NEBEN_RE.test(l)); return (haupt.length ? haupt : z).join("; "); })()}. Diese Feststellungen danach nicht noch einmal wiederholen.${erkundungZeilen(f).some(l => NEBEN_RE.test(l)) && erkundungZeilen(f).some(l => !NEBEN_RE.test(l)) ? " Nebensächliches wie auslaufende Betriebsstoffe NICHT als Grund der Erhöhung nennen, sondern erst gegen Ende kurz erwähnen." : ""}` : ""}`);
   }
   const kt = f.klartext || st?.klartext || f.code;
   if (/gemeldete lage best[äa]tigte sich/i.test(f.besonderheiten))
@@ -920,7 +930,7 @@ function buildPrompt(f) {
   for (const b of f.beteiligte) {
     const istFw = /feuerwehr/i.test(b.name);
     const rolle = b.lead ? "einsatzführend" : !istFw ? "ebenfalls vor Ort, keine Feuerwehr" : (isLingen(b.name) && b.fz.length ? "unterstützend, angefordert" : "unterstützend");
-    gesamt += b.fz.length;
+    gesamt += fzListe(b).length;
     const sonder = b.fz.filter(fzSonder);
     let fz;
     if (!f.fzNennen) fz = "KEINE Fahrzeuge nennen";
@@ -931,7 +941,9 @@ function buildPrompt(f) {
     else fz = "Fahrzeuge nicht nennen";
     const art = b.lead ? "start" : alarmArt(b, f);
     if (art === "erh" && istFw) fz = `erst DURCH DIE STICHWORTERHÖHUNG zusätzlich alarmiert – NICHT in den ersten Satz. Nach der Erhöhung oder am Ende nennen, z. B. „Mit der Erhöhung wurde zusätzlich die ${b.name} alarmiert.“ oder „Unterstützt wurden wir dabei von der ${b.name}.“ Keine Fahrzeuge nennen.`;
-    if (art === "nach" && istFw) fz = `im weiteren Verlauf gezielt NACHALARMIERT – NICHT in den ersten Satz. ${b.fz.length ? `Hier das Fahrzeug mit Kurzbezeichnung nennen: ${b.fz.join(", ")} (z. B. „Im weiteren Verlauf wurde ${b.fz.length === 1 ? "das " + b.fz[0] : "die Fahrzeuge " + b.fz.join(" und ")} der ${b.name} nachalarmiert.“).` : `Formulierung z. B. „Im weiteren Verlauf wurde die ${b.name} nachalarmiert.“`}`;
+    const typen = [...new Set(b.fz.map(fzTyp))];
+    if (art === "nach" && istFw) fz = `im weiteren Verlauf gezielt NACHALARMIERT – NICHT in den ersten Satz. ${typen.length ? `Das Fahrzeug NUR mit dieser Kurzbezeichnung ohne Zahlen nennen: ${typen.join(", ")} (z. B. „Im weiteren Verlauf wurde ${typen.length === 1 ? "das " + typen[0] : "die Fahrzeuge " + typen.join(" und ")} der ${b.name} nachalarmiert.“). Keine Normbezeichnung wie „LF 8/6“ oder „HLF 20“.` : `Formulierung z. B. „Im weiteren Verlauf wurde die ${b.name} nachalarmiert.“`}`;
+    if (!istFw && b.fz.length) fz = `darf allgemein genannt werden: mit ${fzGruppe(fzListe(b), false)}`;
     lines.push(`  - ${b.name} (${rolle}): ${fz}`);
   }
   const wehren = f.beteiligte.filter(b => /feuerwehr/i.test(b.name)).length;
@@ -951,6 +963,7 @@ function buildPrompt(f) {
 - Bekannte Einheiten mit bestimmtem Artikel: „die Rettungshundestaffel“, „die DLRG“, „der Polizeihubschrauber“.
 
 Formulierungsregeln (verbindlich):
+- Menschenrettung hat Vorrang in der Erzählung: Nebensächliches wie auslaufende Betriebsstoffe, Abstreuen oder Fahrbahnreinigung erst gegen Ende kurz erwähnen – nie vor der Rettung. Bei Betriebsstoffen nur „abgestreut“, nicht „aufgenommen“.
 - Menschenrettung und Brandbekämpfung laufen gleichzeitig: „Parallel dazu …“ statt „im Anschluss“ oder „danach“.
 - Niemals erfinden, WIE Personen gerettet wurden (Drehleiter, tragbare Leitern, Angriffstrupp) oder wie viele Trupps, Strahlrohre oder Einsatzkräfte vorgingen. Steht es nicht in den Stichpunkten, allgemein bleiben.
 - „Brannte in voller Ausdehnung“ nur für das Objekt verwenden, das in den Stichpunkten genannt ist; ist nichts genannt, allgemein bleiben.
@@ -1331,7 +1344,26 @@ const ACT = {
   removewehr: t => { S.form.beteiligte.splice(+t.dataset.i, 1); render(); },
   setalarm: t => { const b = S.form.beteiligte[+t.dataset.i]; b.alarm = t.dataset.v; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   dupnach: t => { const b = S.form.beteiligte[+t.dataset.i]; S.form.beteiligte.splice(+t.dataset.i + 1, 0, { name: b.name, fz: [], lead: false, alarm: "nach" }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
-  togglefz: t => { const b = S.form.beteiligte[+t.dataset.i], v = t.dataset.v; b.fz = b.fz.includes(v) ? b.fz.filter(x => x !== v) : [...b.fz, v]; render(); },
+  togglefz: t => {
+    const b = S.form.beteiligte[+t.dataset.i], v = t.dataset.v;
+    if (b.fz.includes(v)) { b.fz = b.fz.filter(x => x !== v); if (b.anz) delete b.anz[v]; }
+    else if (zaehlbar(b, v)) {
+      S.pendingFz = { i: +t.dataset.i, v };
+      S.modal = `<div class="sheet-head"><h2>Wie viele ${esc(v)} waren im Einsatz?</h2><button class="iconbtn" data-act="closemodal" aria-label="Schließen">${ICON.x}</button></div>
+        <p class="hint">${esc(b.name)}</p>
+        <div class="qnums">${[1, 2, 3, 4, 5, 6].map(n => `<button type="button" class="chip qn" data-act="fzanz" data-n="${n}">${n}</button>`).join("")}</div>
+        <div class="row qfree"><input id="fzfree" type="number" inputmode="numeric" min="1" placeholder="andere Zahl"><button type="button" class="btn primary" data-act="fzanz">Übernehmen</button></div>`;
+      const y = window.scrollY; render(); window.scrollTo(0, y); return;
+    }
+    else b.fz = [...b.fz, v];
+    saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y);
+  },
+  fzanz: t => {
+    const n = Number(t.dataset.n || $("#fzfree")?.value); if (!(n > 0) || !S.pendingFz) return;
+    const b = S.form.beteiligte[S.pendingFz.i], v = S.pendingFz.v;
+    if (!b.fz.includes(v)) b.fz.push(v); b.anz = { ...(b.anz || {}), [v]: n };
+    S.pendingFz = null; S.modal = null; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y);
+  },
   resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; render(); } },
   generate: () => generate(),
   copyresult: () => copy(S.result.text),
