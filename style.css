@@ -319,3 +319,31 @@ button:focus-visible{outline:3px solid var(--red-line);outline-offset:2px}
 .alarmseg button{flex:1 1 auto;min-width:0;min-height:36px;border:0;background:transparent;border-radius:9px;font-size:13px;font-weight:600;color:var(--ink2);cursor:pointer;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .alarmseg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(15,23,42,.12)}
 .linkbtn.small{font-size:13px;align-self:flex-start;padding:2px 0}
+
+/* ---------- Geführte Lagebeschreibung ---------- */
+.vorl{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.vorl-l{display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px}
+.vorl-l span{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.vorl-l select{min-height:46px;font-size:15px;font-weight:600}
+.vorl-prog{font-size:13px;font-weight:700;color:var(--ok);background:var(--ok-soft);padding:6px 10px;border-radius:999px;white-space:nowrap}
+.picker.stp input{min-height:46px}
+.secs{display:flex;flex-direction:column;gap:10px}
+.sec{border:1px solid var(--line);border-radius:16px;background:#fff;transition:border-color .2s,box-shadow .2s}
+.sec.open{border-color:#CBD5E1;box-shadow:0 0 0 3px #EEF2F7}
+.sec-head{display:flex;align-items:center;gap:12px;width:100%;min-height:62px;padding:8px 14px;border:0;background:none;cursor:pointer;text-align:left}
+.sec-dot{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none;font-weight:800;font-size:14px;background:#EEF2F7;color:var(--ink2)}
+.sec.open .sec-dot{background:var(--red);color:#fff}
+.sec.done .sec-dot{background:var(--ok);color:#fff}
+.sec-t{flex:1;min-width:0;display:flex;flex-direction:column}
+.sec-t b{font-size:16px}
+.sec-t small{font-size:13px;color:var(--warn);font-weight:600}
+.sec.done .sec-t small{color:var(--ok)}
+.sec-chev{font-size:22px;color:var(--muted);transition:transform .2s;line-height:1}
+.sec.open .sec-chev{transform:rotate(90deg)}
+.sec-body{display:flex;flex-direction:column;gap:8px;padding:0 14px 14px}
+.sec-q{margin:0 0 2px;color:var(--muted);font-size:14px}
+.sec-grp{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-top:8px}
+.sec-body .chip{text-align:left;justify-content:flex-start}
+.sec-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding-top:12px;border-top:1px solid var(--line);flex-wrap:wrap}
+.sec-foot .btn.next{display:flex;min-width:0;min-height:42px;padding:0 16px;background:var(--ink);color:#fff;border-color:var(--ink);margin-left:auto}
+.offen-list{margin:4px 0 8px;padding-left:20px;line-height:1.7;font-weight:600}

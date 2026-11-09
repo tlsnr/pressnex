@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1225";
+import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261109-1300";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -119,7 +119,7 @@ function newForm() {
     datum: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     uhrzeit: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     code: "", klartext: "", ort: "", adresse: "", besonderheiten: "",
-    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [], keineWeiteren: false,
+    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [], keineWeiteren: false, vorlage: "", nichts: {},
     beteiligte: [], ausschreiben: false, fzNennen: false
   };
 }
@@ -235,7 +235,7 @@ onAuthStateChanged(auth, async user => {
   S.loading = false; render();
 });
 
-const BAUSTEINE_VERSION = "20261109-1140";
+const BAUSTEINE_VERSION = "20261109-1300";
 async function loadConfig() {
   const [st, ki] = await Promise.all([getDoc(doc(db, "config", "stammdaten")), getDoc(doc(db, "config", "ki"))]);
   if (st.exists()) {
@@ -393,6 +393,7 @@ function stepFehlt(n, f) {
   if (n === 1) { if (!f.datum) m.push("Datum"); if (!f.uhrzeit) m.push("Alarmzeit"); if (!f.code) m.push("Einsatzstichwort"); }
   if (n === 2 && !d.lead) m.push("Hauptfeuerwehr");
   if (n === 3 && d.lead && !f.beteiligte.some(b => isLingen(b.name))) m.push("mindestens eine Lingener Ortsfeuerwehr");
+  if (n === 4 && !f.besonderheiten.trim()) m.push("Stichpunkte zur Lage");
   return m;
 }
 const stepWarn = (n, f) => { const m = stepFehlt(n, f); return m.length && (S.tried || (S.maxStep || 1) > n) ? m : []; };
@@ -520,7 +521,7 @@ function viewNeu(main) {
     ${d.anfo.length ? `<div class="notice info"><b>Anforderungen:</b> ${d.anfo.map(a => esc(a)).join(", ")}</div>` : ""}
     <button type="button" class="btn next" data-act="nextstep" data-n="4">Weiter</button>`;
 
-  const body4 = `${bausteinPanel(f)}
+  const body4 = `${gefuehrtPanel(f)}
     <div id="rqbox">${rueckfragenHtml(f)}</div>
     <textarea id="lage" data-bind="besonderheiten" rows="6" placeholder="Stichpunkte antippen oder selbst schreiben – die KI erfindet nichts dazu.">${esc(f.besonderheiten)}</textarea>
     <label class="check"><input type="checkbox" data-bind="fzNennen" ${f.fzNennen ? "checked" : ""}> Fahrzeuge im Bericht erwähnen <span class="hint inline">(sonst nur die Feuerwehren)</span></label>`;
@@ -535,7 +536,7 @@ function viewNeu(main) {
         ${stepCard(3, "Weitere beteiligte Kräfte", false, s3, body3, done[3])}
       </div>
       <div class="stack">
-        ${stepCard(4, "Lagebeschreibung", false, s4, body4, done[4])}
+        ${stepCard(4, "Lagebeschreibung", true, s4, body4, done[4])}
         <div class="genbar">
           ${S.error ? `<div class="notice err">${esc(S.error)}</div>` : ""}
           <button class="btn primary big block" data-act="generate" ${S.busy ? "disabled" : ""}>${S.busy ? `<span class="spinner"></span> KI schreibt …` : `${ICON.spark} Bericht mit KI erstellen`}</button>
@@ -617,6 +618,7 @@ function tplFind(t) {
   for (const tab of (S.stamm.bausteine || [])) for (const p of tab.punkte) {
     const { t: tt, q } = tplSplit(p); if ((tab.prefix || "") + tt === t) return { t, q };
   }
+  for (const vl of VORLAGEN) for (const a of ABSCHNITTE) for (const p of vl[a.id] || []) { const { t: tt, q } = tplSplit(p); if (tt === t && q) return { t, q }; }
   return { t, q: "" };
 }
 function openTpl(t, q) {
@@ -644,6 +646,79 @@ function tplCommit(val) {
   const ta = $("#lage"); if (ta) ta.scrollTop = ta.scrollHeight;
 }
 
+/* ---------- Geführte Lagebeschreibung ---------- */
+function vorlageFuer(f) {
+  if (f.vorlage) { const v = VORLAGEN.find(x => x.id === f.vorlage); if (v) return v; }
+  const st = aaoByCode(f.code2) || aaoByCode(f.code);
+  return VORLAGEN.find(v => v.match.test(st ? st.code : "")) || VORLAGEN.at(-1);
+}
+const TAB_SEC = { "Was brennt": "lage", "Lage": "lage", "Erste Maßnahmen": "mass", "Löschangriff": "mass", "Nachlöschen": "mass", "Technische Hilfe": "mass", "Gefahrgut": "mass", "Personen": "pers", "Abschluss": "ende" };
+const GRP_SEC = { "Lage|Bedingungen": "gefahr", "Technische Hilfe|Lage vor Ort": "lage", "Gefahrgut|Lage": "lage", "Personen|Andere Organisationen": "ende" };
+let klassIdx = null, klassKey = "";
+function klassIndex() {
+  const v = vorlageFuer(S.form), key = v.id + "|" + (S.stamm.bausteine || []).length;
+  if (klassIdx && klassKey === key) return klassIdx;
+  const out = [], secI = id => ABSCHNITTE.findIndex(a => a.id === id);
+  const addV = (vl, off) => ABSCHNITTE.forEach((a, si) => (vl[a.id] || []).forEach((p, j) => { if (!p.startsWith("## ")) out.push({ re: tplRegex(tplSplit(p).t), sec: a.id, rang: si * 1e5 + off + j }); }));
+  addV(v, 0);
+  VORLAGEN.forEach((vl, k) => { if (vl !== v) addV(vl, 1000 + k * 200); });
+  (S.stamm.bausteine || []).forEach((tab, ti) => { let grp = ""; tab.punkte.forEach((p, j) => {
+    if (p.startsWith("## ")) { grp = p.slice(3); return; }
+    const sec = GRP_SEC[tab.reiter + "|" + grp] || TAB_SEC[tab.reiter] || "mass";
+    out.push({ re: tplRegex((tab.prefix || "") + tplSplit(p).t), sec, rang: secI(sec) * 1e5 + 50000 + ti * 200 + j });
+  }); });
+  klassIdx = out; klassKey = key; return out;
+}
+function klassifiziere(line) { for (const x of klassIndex()) if (x.re.test(line)) return x; return null; }
+function secStatus(f, a) {
+  const z = lageZeilen(f).filter(l => klassifiziere(l)?.sec === a.id);
+  const nichts = !!(f.nichts || {})[a.id];
+  return { n: z.length, zeilen: z, nichts, done: z.length > 0 || nichts };
+}
+function chipHtml(full, q, zeilen, strip) {
+  const re = tplRegex(full), hit = zeilen.find(l => re.test(l)), vars = tplHasVars(full);
+  let label = hit && vars ? hit : tplLabel(full);
+  if (strip) label = label.replace(strip, "");
+  return `<button type="button" class="chip small ${hit ? "on" : ""}${vars && !hit ? " ask" : ""}" data-act="baustein" data-v="${esc(full)}" data-q="${esc(q)}">${hit ? "✓ " : ""}${esc(label)}</button>`;
+}
+function gefuehrtPanel(f) {
+  const v = vorlageFuer(f), zeilen = lageZeilen(f), auto = !f.vorlage;
+  const stats = ABSCHNITTE.map(a => secStatus(f, a));
+  if (S.secOpen === undefined) { const i = stats.findIndex(x => !x.done); S.secOpen = ABSCHNITTE[i < 0 ? 0 : i].id; }
+  const fertig = stats.filter(x => x.done).length;
+  let h = `<div class="vorl"><label class="vorl-l"><span>Vorlage</span>
+      <select data-act-change="vorlage" aria-label="Vorlage wählen"><option value="">${auto ? "Automatisch: " + esc(v.name) : "Automatisch nach Stichwort"}</option>
+      ${VORLAGEN.map(x => `<option value="${x.id}" ${f.vorlage === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+      <span class="vorl-prog">${fertig} von ${ABSCHNITTE.length} Abschnitten</span></div>
+    <div class="picker stp"><input type="search" placeholder="Stichpunkt suchen, z. B. Drehleiter" data-search="stp" autocomplete="off"><div class="picklist hidden"></div></div>
+    <div class="secs">`;
+  ABSCHNITTE.forEach((a, i) => {
+    const st = stats[i], open = S.secOpen === a.id, liste = v[a.id] || [];
+    const status = st.n ? `${st.n} ausgewählt` : st.nichts ? a.nichts : "noch offen";
+    h += `<div class="sec ${open ? "open" : ""} ${st.done ? "done" : ""}" data-sec="${a.id}">
+      <button type="button" class="sec-head" data-act="secopen" data-v="${a.id}" aria-expanded="${open}">
+        <span class="sec-dot">${st.done ? "✓" : i + 1}</span><span class="sec-t"><b>${esc(a.titel)}</b><small>${esc(status)}</small></span><span class="sec-chev" aria-hidden="true">›</span></button>`;
+    if (open) {
+      const bekannt = liste.filter(p => !p.startsWith("## ")).map(p => tplRegex(tplSplit(p).t));
+      const fremd = st.zeilen.filter(l => !bekannt.some(re => re.test(l)));
+      h += `<div class="sec-body"><p class="sec-q">${esc(a.frage)}</p>
+        ${fremd.length ? `<div class="sec-grp">Ebenfalls ausgewählt</div><div class="chips">${fremd.map(l => chipHtml(l, "", zeilen)).join("")}</div>` : ""}`;
+      let chips = "";
+      for (const p of liste) {
+        if (p.startsWith("## ")) { if (chips) h += `<div class="chips">${chips}</div>`; chips = ""; h += `<div class="sec-grp">${esc(p.slice(3))}</div>`; continue; }
+        const { t, q } = tplSplit(p); chips += chipHtml(t, q, zeilen, /^Es brannte:\s*/);
+      }
+      if (chips) h += `<div class="chips">${chips}</div>`;
+      const next = ABSCHNITTE[i + 1];
+      h += `<div class="sec-foot">${a.nichts ? `<button type="button" class="chip small keine-btn ${st.nichts ? "on" : ""}" data-act="secnichts" data-v="${a.id}">${st.nichts ? "✓ " : ""}${esc(a.nichts)}</button>` : "<span></span>"}
+        ${next ? `<button type="button" class="btn next small" data-act="secopen" data-v="${next.id}">Weiter: ${esc(next.titel.split(" ")[0])}</button>` : ""}</div></div>`;
+    }
+    h += `</div>`;
+  });
+  h += `</div><button type="button" class="linkbtn small" data-act="allestp">${S.alleStp ? "Reiter-Ansicht ausblenden" : "Alle Stichpunkte nach Reitern anzeigen"}</button>
+    ${S.alleStp ? bausteinPanel(f) : ""}`;
+  return h;
+}
 function bausteinPanel(f) {
   const tabs = S.stamm.bausteine || DEFAULT_STAMM.bausteine || [];
   if (!tabs.length) return "";
@@ -705,8 +780,8 @@ function rueckfragen(f) {
     add("erhWann", "Wann wurde das Stichwort erhöht?", [
       { label: "Auf der Anfahrt", act: "qset", k: "erhWann", v: "auf der Anfahrt" },
       { label: "Vor Ort", act: "qset", k: "erhWann", v: "vor Ort" }]);
-  if (autoTab(f) === "Was brennt" && z.length >= 2 && !brennt.length && S.curTab !== "Was brennt" && !has(/zunächst unklar|keine feststellungen|fehlalarm/i))
-    { add("wasBrennt", "Was hat gebrannt?", [{ label: "Zu „Was brennt“", act: "qtab", v: "Was brennt" }], "Ohne Angabe bleibt der Bericht beim Brandobjekt allgemein."); if (out.length) out[out.length - 1].noPop = true; }
+  if (autoTab(f) === "Was brennt" && vorlageFuer(f).id !== "bma" && z.length >= 2 && !brennt.length && S.secOpen !== "lage" && !has(/zunächst unklar|keine feststellungen|fehlalarm|kein brand/i))
+    { add("wasBrennt", "Was hat gebrannt?", [{ label: "Zu „Lage beim Eintreffen“", act: "qsec", v: "lage" }], "Ohne Angabe bleibt der Bericht beim Brandobjekt allgemein."); if (out.length) out[out.length - 1].noPop = true; }
   return out;
 }
 // Neue Rückfrage direkt beim Antippen als Fenster zeigen (jede nur einmal); offene bleiben als Karte stehen
@@ -809,6 +884,7 @@ function validate(f) {
   if (!f.code) e.push("Bitte ein Einsatzstichwort auswählen.");
   if (!d.lead) e.push("Bitte die Hauptfeuerwehr auswählen.");
   if (!f.beteiligte.some(b => isLingen(b.name))) e.push("Mindestens eine Lingener Ortsfeuerwehr muss beteiligt sein.");
+  if (!f.besonderheiten.trim()) e.push("Bitte die Lage beschreiben – mindestens ein Stichpunkt.");
   return e;
 }
 function setLead(name) {
@@ -849,20 +925,16 @@ function fzText(v, aus) { return aus ? v : fzAllgemein(v); }
 const LEBEN_RE = /eingeklemmt|eingeschlossen|menschenrettung|gerettet|person im wasser|vermisst|verstarb/i;
 const NEBEN_RE = /betriebsstoff|abgestreut|ölspur|fahrbahn (gereinigt|blockiert)|fahrbahn$/i;
 function sortiereLage(txt) {
-  const tabs = S.stamm.bausteine || [];
-  const idx = line => {
-    const l = line.replace(/^-\s*/, "").trim();
-    for (let i = 0; i < tabs.length; i++) for (let j = 0; j < tabs[i].punkte.length; j++) {
-      const p = tabs[i].punkte[j]; if (p.startsWith("## ")) continue;
-      if (tplRegex((tabs[i].prefix || "") + tplSplit(p).t).test(l)) return i * 1000 + j;
-    }
-    return -1;
-  };
   let last = 0;
   const all = txt.split("\n").filter(x => x.trim());
   const leben = all.some(l => LEBEN_RE.test(l));
-  const absIdx = Math.max(0, tabs.findIndex(t => t.reiter === "Abschluss"));
-  const rows = all.map((line, n) => { let i = idx(line); if (i < 0) i = last; last = i; if (leben && NEBEN_RE.test(line)) i = absIdx * 1000 - (/abgestreut|gereinigt/i.test(line) ? 1 : 2); return { line, i, n }; });
+  const endeIdx = ABSCHNITTE.findIndex(x => x.id === "ende");
+  const rows = all.map((line, n) => {
+    const c = klassifiziere(line.replace(/^-\s*/, "").trim());
+    let i = c ? c.rang : last; last = i;
+    if (leben && NEBEN_RE.test(line)) i = endeIdx * 1e5 - (/abgestreut|gereinigt/i.test(line) ? 1 : 2);
+    return { line, i, n };
+  });
   return rows.sort((a, b) => a.i - b.i || a.n - b.n).map(r => r.line).join("\n");
 }
 // Sonnenauf-/untergang für Lingen (Ems) – vereinfachter NOAA-Algorithmus, Ergebnis in deutscher Ortszeit
@@ -990,11 +1062,22 @@ async function generate() {
   const errs = validate(S.form);
   if (errs.length) {
     S.error = errs.join(" "); S.tried = true;
-    const n = [1, 2, 3].find(k => stepFehlt(k, S.form).length);
+    const n = [1, 2, 3, 4].find(k => stepFehlt(k, S.form).length);
     if (n) { S.step = n; render(); document.querySelector(`.step-card[data-step="${n}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
     else render();
     return;
   }
+  // Noch offene Abschnitte? Einmal nachfragen, damit nichts vergessen wird
+  const offen = ABSCHNITTE.filter(a => !secStatus(S.form, a).done);
+  if (offen.length && !S.offenOk) {
+    S.modal = `<div class="sheet-head"><h2>Noch nichts angegeben</h2><button class="iconbtn" data-act="closemodal" aria-label="Schließen">${ICON.x}</button></div>
+      <p>Zu diesen Abschnitten hast du noch nichts ausgewählt:</p>
+      <ul class="offen-list">${offen.map(a => `<li>${esc(a.titel)}</li>`).join("")}</ul>
+      <p class="hint">Tipp: „${esc(ABSCHNITTE[1].nichts)}“ usw. antippen, wenn es dazu nichts gibt – das landet nicht im Bericht.</p>
+      <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn" data-act="offenfix" data-v="${offen[0].id}">Ergänzen</button><button class="btn primary" data-act="offenok">Trotzdem erstellen</button></div>`;
+    render(); return;
+  }
+  S.offenOk = false;
   S.error = ""; S.busy = true; S.busyStart = Date.now(); render();
   clearInterval(S.timerId);
   S.timerId = setInterval(() => {
@@ -1222,6 +1305,15 @@ function pickerResults(kind, q) {
     for (const a of hits) { if (a.art !== last) { h += `<div class="grp">${esc(a.art)}</div>`; last = a.art; } h += `<button type="button" data-act="pick" data-kind="${kind}" data-v="${esc(a.code)}">${esc(a.klartext)}<small>${esc(a.code)}</small></button>`; }
     return h || `<div class="grp">Kein Treffer</div>`;
   }
+  if (kind === "stp") {
+    if (q.length < 2) return `<div class="grp">Mindestens 2 Buchstaben eingeben</div>`;
+    const seen = new Set(), hits = [], z = lageZeilen(S.form);
+    const push = (full, qq) => { const k = full.toLowerCase(); if (seen.has(k) || !tplLabel(full).toLowerCase().includes(q)) return; seen.add(k); hits.push([full, qq]); };
+    const v = vorlageFuer(S.form);
+    for (const vl of [v, ...VORLAGEN]) for (const a of ABSCHNITTE) for (const p of vl[a.id] || []) if (!p.startsWith("## ")) { const { t, q: qq } = tplSplit(p); push(t, qq); }
+    for (const tab of S.stamm.bausteine || []) for (const p of tab.punkte) if (!p.startsWith("## ")) { const { t, q: qq } = tplSplit(p); push((tab.prefix || "") + t, qq); }
+    return hits.slice(0, 25).map(([full, qq]) => { const on = z.some(l => tplRegex(full).test(l)); return `<button type="button" data-act="baustein" data-v="${esc(full)}" data-q="${esc(qq)}">${on ? "✓ " : ""}${esc(tplLabel(full))}</button>`; }).join("") || `<div class="grp">Kein Treffer – du kannst den Punkt auch unten selbst eintippen</div>`;
+  }
   const exclude = new Set(kind === "add" ? S.form.beteiligte.map(b => b.name) : []);
   const hits = allWehren().filter(w => !exclude.has(w.name) && (!q || w.name.toLowerCase().includes(q) || w.gruppe.toLowerCase().includes(q))).slice(0, 60);
   let last = "", h = "";
@@ -1255,6 +1347,7 @@ document.addEventListener("change", async e => {
   if (t.dataset.bind && t.type === "checkbox") { S.form[t.dataset.bind] = t.checked; return; }
   if (t.dataset.filter && t.dataset.filter !== "q") { S.filter[t.dataset.filter] = t.value; viewArchiv($("#main")); return; }
   const act = t.dataset.actChange;
+  if (act === "vorlage") { S.form.vorlage = t.value; klassIdx = null; S.secOpen = undefined; saveDraft(); render(); return; }
   if (act === "addfz") {
     let v = t.value; if (!v) return;
     if (v === "__frei") { v = (prompt("Fahrzeugbezeichnung, z. B. „LF 20 KatS“") || "").trim(); if (!v) { t.value = ""; return; } }
@@ -1336,7 +1429,7 @@ const ACT = {
     if (kind === "aao") { const a = aaoByCode(v); S.form.code = v; S.form.klartext = a.klartext;
       if (a.art === "Anforderung" && !ableiten(S.form).lead) toast("Anforderung: Bitte die Hauptfeuerwehr wählen, die angefordert hat"); }
     if (kind === "aao2") { S.form.code2 = v; S.form.erhOpen = true; }
-    if (kind === "aao" || kind === "aao2") { S.btab = ""; S.centeredTab = null; }
+    if (kind === "aao" || kind === "aao2") { S.btab = ""; S.centeredTab = null; klassIdx = null; S.secOpen = undefined; }
     if (kind === "lead") setLead(v);
     if (kind === "add" && !S.form.beteiligte.some(b => b.name === v)) { S.form.beteiligte.push({ name: v, fz: [], lead: false }); S.form.keineWeiteren = false; }
     render();
@@ -1363,6 +1456,14 @@ const ACT = {
   keine: () => { S.form.keineWeiteren = !S.form.keineWeiteren; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   addwehr: t => { S.form.keineWeiteren = false; if (!S.form.beteiligte.some(b => b.name === t.dataset.name)) S.form.beteiligte.push({ name: t.dataset.name, fz: [], lead: false }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   removewehr: t => { S.form.beteiligte.splice(+t.dataset.i, 1); render(); },
+  secopen: t => { const v = t.dataset.v; S.secOpen = S.secOpen === v && !t.classList.contains("next") ? "" : v; render();
+    const el = document.querySelector(`.sec[data-sec="${v}"]`); if (el) { const r = el.getBoundingClientRect(); if (r.top < 90 || r.top > innerHeight * .5) window.scrollBy({ top: r.top - 110, behavior: "smooth" }); } },
+  secnichts: t => { const f = S.form, v = t.dataset.v; f.nichts = { ...(f.nichts || {}), [v]: !(f.nichts || {})[v] }; saveDraft();
+    const i = ABSCHNITTE.findIndex(a => a.id === v); if (f.nichts[v] && ABSCHNITTE[i + 1]) { S.secOpen = ABSCHNITTE[i + 1].id; }
+    render(); const el = document.querySelector(`.sec[data-sec="${S.secOpen}"]`); if (el) { const r = el.getBoundingClientRect(); window.scrollBy({ top: r.top - 110, behavior: "smooth" }); } },
+  allestp: () => { S.alleStp = !S.alleStp; const y = window.scrollY; render(); window.scrollTo(0, y); },
+  offenok: () => { S.offenOk = true; S.modal = null; generate(); },
+  offenfix: t => { S.modal = null; S.step = 4; S.secOpen = t.dataset.v; render(); const el = document.querySelector(`.sec[data-sec="${t.dataset.v}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
   setalarm: t => { const b = S.form.beteiligte[+t.dataset.i]; b.alarm = t.dataset.v; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   dupnach: t => { const b = S.form.beteiligte[+t.dataset.i]; S.form.beteiligte.splice(+t.dataset.i + 1, 0, { name: b.name, fz: [], lead: false, alarm: "nach" }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   togglefz: t => {
@@ -1385,7 +1486,7 @@ const ACT = {
     if (!b.fz.includes(v)) b.fz.push(v); b.anz = { ...(b.anz || {}), [v]: n };
     S.pendingFz = null; S.modal = null; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y);
   },
-  resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; render(); } },
+  resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; S.secOpen = undefined; klassIdx = null; render(); } },
   generate: () => generate(),
   copyresult: () => copy(S.result.text),
   save: () => saveReport(),
@@ -1429,6 +1530,7 @@ const ACT = {
     else if (o.act === "qset") f[o.k] = o.v;
     else if (o.act === "qtab") { S.btab = o.v; S.btabCenter = true; S.bchipScroll = 0; }
     else if (o.act === "qerk") { erkModal(); render(); return; }
+    else if (o.act === "qsec") { S.secOpen = o.v; }
     saveDraft(); askNew();
     const y = window.scrollY; render(); window.scrollTo(0, y);
   },
