@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1015";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1110";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -235,9 +235,15 @@ onAuthStateChanged(auth, async user => {
   S.loading = false; render();
 });
 
+const BAUSTEINE_VERSION = "20261109-1110";
 async function loadConfig() {
   const [st, ki] = await Promise.all([getDoc(doc(db, "config", "stammdaten")), getDoc(doc(db, "config", "ki"))]);
-  if (st.exists()) S.stamm = { ...structuredClone(DEFAULT_STAMM), ...st.data() };
+  if (st.exists()) {
+    const d = st.data();
+    S.stamm = { ...structuredClone(DEFAULT_STAMM), ...d };
+    // Ältere gespeicherte Stichpunkte automatisch durch die aktuelle Version ersetzen
+    if (d.bausteineVersion !== BAUSTEINE_VERSION) { S.stamm.bausteine = structuredClone(DEFAULT_STAMM.bausteine); S.stamm.bausteineVersion = BAUSTEINE_VERSION; }
+  }
   if (ki.exists()) S.ki = { ...DEFAULT_KI, ...ki.data() };
 }
 
@@ -427,20 +433,39 @@ function erhBlock(f) {
   </div>`;
 }
 const ERKUNDUNG = "Lageerkundung durch ersteintreffende Kräfte";
-const ERK_OPTS = ["Lage zunächst unklar", "Brandgeruch wahrnehmbar", "Leichte Rauchentwicklung im Gebäude", "Leichte Rauchentwicklung außerhalb des Gebäudes",
-  "Starke Rauchentwicklung im Gebäude", "Starke Rauchentwicklung sichtbar", "Rauch drang aus dem Dachbereich", "Rauch drang aus einem Fenster",
-  "Flammen schlugen aus dem Fenster", "Feuerschein sichtbar", "Brannte bereits in voller Ausdehnung", "Feuer drohte auf ein Nachbargebäude überzugreifen"];
-const ERK_PERS = "Es befanden sich noch [#] {Person|Personen} im Gebäude";
+// Feststellungen der Erkundung – passend zur Einsatzart
+const ERK_ALLG = ["Lage zunächst unklar", "Rettungsdienst bereits vor Ort", "Polizei bereits vor Ort"];
+const ERK_SETS = {
+  brand: ["Brandgeruch wahrnehmbar", "Leichte Rauchentwicklung im Gebäude", "Leichte Rauchentwicklung außerhalb des Gebäudes",
+    "Starke Rauchentwicklung im Gebäude", "Starke Rauchentwicklung sichtbar", "Rauch drang aus dem Dachbereich", "Rauch drang aus einem Fenster",
+    "Flammen schlugen aus dem Fenster", "Feuerschein sichtbar", "Brannte bereits in voller Ausdehnung", "Feuer drohte auf ein Nachbargebäude überzugreifen",
+    "Es befanden sich noch [#] {Person|Personen} im Gebäude"],
+  th: ["[#] {Person|Personen} eingeklemmt", "[#] {Person|Personen} im Fahrzeug eingeschlossen", "Mehrere Fahrzeuge beteiligt", "PKW auf der Seite / auf dem Dach",
+    "Betriebsstoffe liefen aus", "Rauchentwicklung am Fahrzeug", "Person in einer Notlage", "Person im Wasser", "Person im Aufzug eingeschlossen",
+    "Gefahr durch herabstürzende Teile", "Baum drohte umzustürzen", "Fahrbahn blockiert", "Wasser in Gebäude eingedrungen", "[#] {Person|Personen} verletzt"],
+  suche: ["Person weiterhin vermisst", "Gesuchte Person hilflos oder orientierungslos", "Hinweise auf den möglichen Aufenthaltsort", "Großes Gebiet abgesucht", "Waldstück abgesucht"],
+  gas: ["Gasgeruch wahrgenommen", "Austretender Stoff festgestellt", "Unbekannter Stoff ausgetreten", "Messgeräte schlugen an", "Personen klagten über Atemwegsreizungen", "[#] {Person|Personen} verletzt"],
+  manv: ["[#] {Person|Personen} verletzt", "[#] {Person|Personen} leicht verletzt", "[#] {Person|Personen} schwer verletzt", "Personen klagten über Atemwegsreizungen", "[#] {Person|Personen} eingeklemmt"]
+};
+function erkSet(f) {
+  const st = aaoByCode(f.code2) || aaoByCode(f.code);
+  if (st && /suche/i.test(st.code)) return "suche";
+  const tab = autoTab(f);
+  return tab === "Technische Hilfe" ? "th" : tab === "Gefahrgut" ? "gas" : tab === "Personen" ? "manv" : "brand";
+}
+const erkOpts = f => [...ERK_ALLG.slice(0, 1), ...ERK_SETS[erkSet(f)], ...ERK_ALLG.slice(1)];
+const ERK_ALL = [...new Set([...ERK_ALLG, ...Object.values(ERK_SETS).flat()])];
 function erkundungZeilen(f) {
-  const z = lageZeilen(f), re = tplRegex(ERK_PERS);
-  return z.filter(l => ERK_OPTS.some(o => tplRegex(o).test(l)) || re.test(l));
+  return lageZeilen(f).filter(l => ERK_ALL.some(o => tplRegex(o).test(l)));
 }
 function erkModal() {
-  const f = S.form;
+  const f = S.form, z = lageZeilen(f);
   S.modal = `<div class="sheet-head"><h2>Was haben die ersteintreffenden Kräfte festgestellt?</h2><button class="iconbtn" data-act="closemodal" aria-label="Fertig">${ICON.x}</button></div>
     <p class="hint">Mehrfachauswahl möglich – landet automatisch in der Lagebeschreibung.</p>
-    <div class="chips erk-chips">${ERK_OPTS.map(o => { const on = hatZeile(f, o); return `<button type="button" class="chip small ${on ? "on" : ""}" data-act="erkopt" data-v="${esc(o)}">${on ? "✓ " : ""}${esc(o)}</button>`; }).join("")}
-      ${(() => { const hit = lageZeilen(f).find(l => tplRegex(ERK_PERS).test(l)); return `<button type="button" class="chip small ${hit ? "on" : "ask"}" data-act="erkpers">${hit ? "✓ " + esc(hit) : "Es befanden sich noch … Personen im Gebäude"}</button>`; })()}</div>
+    <div class="chips erk-chips">${erkOpts(f).map(o => {
+      const hit = z.find(l => tplRegex(o).test(l)), vars = tplHasVars(o);
+      return `<button type="button" class="chip small ${hit ? "on" : vars ? "ask" : ""}" data-act="erkopt" data-v="${esc(o)}">${hit ? "✓ " + esc(hit) : esc(tplLabel(o))}</button>`;
+    }).join("")}</div>
     <button type="button" class="btn primary block" data-act="closemodal">Fertig</button>`;
 }
 function viewNeu(main) {
@@ -1279,8 +1304,13 @@ const ACT = {
   erhgrund: t => { const g = t.dataset.v, a = S.form.erhGruende, an = !a.includes(g); S.form.erhGruende = an ? [...a, g] : a.filter(x => x !== g); saveDraft();
     if (an && g === ERKUNDUNG) erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   erkopen: () => { erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y); },
-  erkopt: t => { const f = S.form, v = t.dataset.v; if (hatZeile(f, v)) lageRemove(f, v); else lageAdd(f, v); saveDraft(); erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y); },
-  erkpers: () => { const f = S.form; if (hatZeile(f, ERK_PERS)) { lageRemove(f, ERK_PERS); saveDraft(); erkModal(); render(); } else { S.pendingReplace = null; S.afterTpl = "erk"; openTpl(ERK_PERS, tplFind(ERK_PERS).q || "Wie viele Personen befanden sich noch im Gebäude?"); } },
+  erkopt: t => {
+    const f = S.form, v = t.dataset.v;
+    if (hatZeile(f, v)) lageRemove(f, v);
+    else if (tplHasVars(v)) { S.pendingReplace = null; S.afterTpl = "erk"; openTpl(v, tplFind(v).q); return; }
+    else lageAdd(f, v);
+    saveDraft(); erkModal(); const y = window.scrollY; render(); window.scrollTo(0, y);
+  },
   bgrp: t => { const v = t.dataset.v; S.bopen = S.bopen || {}; S.bopen[S.curTab] = S.bopen[S.curTab] === v ? null : v; const y = window.scrollY; render(); window.scrollTo(0, y);
     const el = [...document.querySelectorAll(".bgrp-head")].find(x => x.dataset.v === v); if (el) { const r = el.getBoundingClientRect(); if (r.top < 80 || r.top > innerHeight * 0.6) window.scrollBy({ top: r.top - 140, behavior: "smooth" }); } },
   gostep: t => { const n = +t.dataset.n; S.step = n; render(); const el = document.querySelector(`.step-card[data-step="${n}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
@@ -1352,6 +1382,7 @@ const ACT = {
     try {
       const st = {};
       for (const k of ["eigene", "eigeneFahrzeuge", "gruppen", "fahrzeuge", "aao", "bausteine"]) st[k] = JSON.parse($("#sd-" + k).value);
+      st.bausteineVersion = BAUSTEINE_VERSION;
       await setDoc(doc(db, "config", "stammdaten"), st); S.stamm = st; toast("Stammdaten gespeichert");
     } catch (e) { toast(e instanceof SyntaxError ? "Formatfehler im JSON – bitte prüfen" : "Fehler: " + (e.code || e.message)); }
   },
