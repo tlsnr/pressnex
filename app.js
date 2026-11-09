@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1140";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1155";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -481,7 +481,7 @@ function viewNeu(main) {
   const s1 = st ? `${st.code}${f.code2 ? " → " + f.code2 : ""}${f.ort ? " · " + f.ort : ""} · ${deDate(f.datum)} ${f.uhrzeit}` : "";
   const s2 = d.lead ? d.lead.name + (d.eigen ? "" : " (auswärts)") : "";
   const andere = f.beteiligte.filter(b => !b.lead);
-  const s3 = andere.length ? andere.map(b => b.name.replace("Feuerwehr ", "")).join(", ") : f.keineWeiteren ? "Keine weiteren Kräfte" : "";
+  const s3 = andere.length ? [...new Set(andere.map(b => b.name.replace("Feuerwehr ", "")))].join(", ") : f.keineWeiteren ? "Keine weiteren Kräfte" : "";
   const s4 = nPunkte ? `${nPunkte} Stichpunkt${nPunkte > 1 ? "e" : ""}` : "";
   const leadIdx = f.beteiligte.findIndex(b => b.lead);
   const done = { 1: !stepFehlt(1, f).length, 2: !!d.lead, 3: (andere.length > 0 || !!f.keineWeiteren) && !stepFehlt(3, f).length, 4: nPunkte > 0 };
@@ -733,6 +733,8 @@ function rueckfragenHtml(f) {
     <div class="chips">${q.opts.map((o, j) => `<button type="button" class="chip small" data-act="qopt" data-i="${i}" data-j="${j}">${esc(o.label)}</button>`).join("")}
     <button type="button" class="chip small skip" data-act="qskip" data-v="${esc(q.id)}">Weiß nicht / überspringen</button></div></div>`).join("")}</div>`;
 }
+const alarmArt = (b, f) => (b.alarm === "erh" && !f.code2) ? "start" : (b.alarm || "start");
+const ALARM_OPTS = [["start", "Von Beginn"], ["erh", "Erhöhung"], ["nach", "Nachalarmiert"]];
 function wehrCard(b, i, inline) {
   const own = S.stamm.eigeneFahrzeuge[b.name] || [];
   const extra = b.fz.filter(v => !own.includes(v));
@@ -740,9 +742,12 @@ function wehrCard(b, i, inline) {
   const opts = S.stamm.fahrzeuge.filter(f => !own.includes(f.kurz) && !b.fz.includes(f.kurz)).map(f => `<option value="${esc(f.kurz)}">${esc(f.kurz)} – ${esc(f.lang)}</option>`).join("");
   return `<div class="wehr ${b.lead ? "lead" : ""}">
     ${inline ? "" : `<div class="wehr-head"><div><b>${esc(b.name)}</b> <span class="tag soft">${/feuerwehr/i.test(b.name) ? "unterstützt" : "vor Ort"}</span></div>
-      <button type="button" class="iconbtn" data-act="removewehr" data-i="${i}" aria-label="${esc(b.name)} entfernen">${ICON.x}</button></div>`}
+      <button type="button" class="iconbtn" data-act="removewehr" data-i="${i}" aria-label="${esc(b.name)} entfernen">${ICON.x}</button></div>
+      ${/feuerwehr/i.test(b.name) ? `<div class="alarmseg" role="group" aria-label="Alarmierung">${ALARM_OPTS.filter(([k]) => k !== "erh" || S.form.code2).map(([k, l]) => `<button type="button" class="${alarmArt(b, S.form) === k ? "on" : ""}" data-act="setalarm" data-i="${i}" data-v="${k}" aria-pressed="${alarmArt(b, S.form) === k}">${l}</button>`).join("")}</div>
+        ${alarmArt(b, S.form) === "nach" ? `<p class="hint">Fahrzeug(e) antippen, das gezielt nachgefordert wurde – es wird im Bericht mit Kurzbezeichnung genannt.</p>` : ""}` : ""}`}
     ${chips ? `<div class="chips">${chips}</div>` : ""}
     <select data-act-change="addfz" data-i="${i}" aria-label="Fahrzeug hinzufügen"><option value="">+ Fahrzeug hinzufügen …</option>${opts}<option value="__frei">Anderes Fahrzeug eingeben …</option></select>
+    ${!inline && /feuerwehr/i.test(b.name) && alarmArt(b, S.form) !== "nach" && !S.form.beteiligte.some((x, j) => j !== i && x.name === b.name) ? `<button type="button" class="linkbtn small" data-act="dupnach" data-i="${i}">+ Weiteres Fahrzeug dieser Wehr wurde nachalarmiert</button>` : ""}
   </div>`;
 }
 
@@ -889,7 +894,7 @@ function buildPrompt(f) {
     const gr = [...f.erhGruende, f.erhFrei.trim()].filter(Boolean);
     lines.push(`- Stichworterhöhung${f.erhWann ? " " + f.erhWann : ""} auf „${f.code2}“ (${st2?.klartext || f.code2})${gr.length ? ", Grund: " + gr.join("; ") : ""}. Im ersten Satz NUR mit dem Grundstichwort alarmieren. ${f.erhWann === "vor Ort"
       ? `Reihenfolge: Alarmierung → Eintreffen und vorgefundene Lage → Erhöhung (z. B. „Aufgrund … wurde das Einsatzstichwort daraufhin auf „${f.code2}“ erhöht.“). Das Eintreffen nur EINMAL beschreiben – danach kein zweites „Beim Eintreffen …“ und kein nachgeschobenes „Die gemeldete Lage bestätigte sich“. War die Lage ernster als gemeldet, genau das sagen.`
-      : `Die Erhöhung im zweiten Satz beschreiben, z. B. „Bereits auf der Anfahrt wurde das Einsatzstichwort ${gr.length ? "aufgrund … " : ""}auf „${f.code2}“ erhöht.“ Danach die Lage beim Eintreffen schildern, das Eintreffen nur einmal erwähnen.`} Gründe als Information formulieren (z. B. „da sich laut Hinweisen noch Personen im Gebäude befinden sollten“).`);
+      : `Die Erhöhung im zweiten Satz beschreiben, z. B. „Bereits auf der Anfahrt wurde das Einsatzstichwort ${gr.length ? "aufgrund … " : ""}auf „${f.code2}“ erhöht.“ Danach die Lage beim Eintreffen schildern, das Eintreffen nur einmal erwähnen.`} Gründe als Information formulieren (z. B. „da sich laut Hinweisen noch Personen im Gebäude befinden sollten“).${f.erhGruende.includes(ERKUNDUNG) && erkundungZeilen(f).length ? ` Die Erhöhung als FOLGE der Erkundung erzählen, z. B. „Bei der Lageerkundung stellten die ersteintreffenden Kräfte fest, dass … Daraufhin wurde das Einsatzstichwort auf „${f.code2}“ erhöht.“ Festgestellt wurde: ${erkundungZeilen(f).join("; ")}. Diese Feststellungen danach nicht noch einmal wiederholen.` : ""}`);
   }
   const kt = f.klartext || st?.klartext || f.code;
   if (/gemeldete lage best[äa]tigte sich/i.test(f.besonderheiten))
@@ -901,14 +906,15 @@ function buildPrompt(f) {
   lines.push(`- Einsatzführende Feuerwehr: ${d.lead.name}`);
   const WIR = "Feuerwehr Lingen";
   const wirDabei = f.beteiligte.some(b => b.name === WIR);
-  const andereLingen = f.beteiligte.filter(b => !b.lead && isLingen(b.name) && b.name !== WIR).map(b => b.name);
+  const andereLingen = f.beteiligte.filter(b => !b.lead && isLingen(b.name) && b.name !== WIR && alarmArt(b, f) === "start").map(b => b.name);
+  const wirKarte = f.beteiligte.find(b => b.name === WIR && !b.lead), wirArt = wirKarte ? alarmArt(wirKarte, f) : "start";
   if (d.lead.name === WIR)
     lines.push(`- Perspektive: „Wir“ = Feuerwehr Lingen, wir führten den Einsatz.${andereLingen.length ? " Mitalarmiert/unterstützend: " + andereLingen.join(", ") + " (gehören in den ersten Satz: „… wurden wir gemeinsam mit der … alarmiert“)." : ""}`);
   else if (wirDabei)
-    lines.push(`- Perspektive: „Wir“ = Feuerwehr Lingen. Die ${d.lead.name} führte den Einsatz, WIR unterstützten SIE. Formulierung z. B.: „… wurden wir zur Unterstützung der ${d.lead.name} … alarmiert.“ bzw. „Wir unterstützten die ${d.lead.name} bei diesem Einsatz.“ NIEMALS schreiben, dass die Feuerwehr Lingen „uns“ unterstützte.`);
+    lines.push(`- Perspektive: „Wir“ = Feuerwehr Lingen. Die ${d.lead.name} führte den Einsatz, WIR unterstützten SIE. Formulierung z. B.: „… wurden wir zur Unterstützung der ${d.lead.name} … alarmiert.“ bzw. „Wir unterstützten die ${d.lead.name} bei diesem Einsatz.“ NIEMALS schreiben, dass die Feuerwehr Lingen „uns“ unterstützte.${wirArt === "erh" ? " Wir wurden erst durch die Stichworterhöhung alarmiert – das so schildern (die Alarmierung der " + d.lead.name + " in der dritten Person beginnen)." : wirArt === "nach" ? " Wir wurden erst im weiteren Verlauf nachalarmiert – das so schildern." : ""}`);
   else
     lines.push(`- Perspektive: Die Feuerwehr Lingen selbst war nicht beteiligt. In der dritten Person über die ${d.lead.name} schreiben („Die ${d.lead.name} wurde … alarmiert“), kein „wir“.`);
-  lines.push("- Beteiligte Kräfte (Fahrzeuge NUR wo ausdrücklich erlaubt nennen):");
+  lines.push("- Beteiligte Kräfte (Fahrzeuge NUR wo ausdrücklich erlaubt nennen). Im ersten Satz nur die Feuerwehren nennen, die von Anfang an alarmiert waren:");
   let gesamt = 0;
   const unterstFw = f.beteiligte.filter(b => !b.lead && /feuerwehr/i.test(b.name));
   for (const b of f.beteiligte) {
@@ -923,6 +929,9 @@ function buildPrompt(f) {
     else if (istFw && unterstFw.length === 1 && b.fz.length === 1) fz = "darf genannt werden: mit " + fzGruppe(b.fz, false);
     else if (sonder.length) fz = "nur dieses Sonderfahrzeug nennen: mit " + fzGruppe(sonder, false);
     else fz = "Fahrzeuge nicht nennen";
+    const art = b.lead ? "start" : alarmArt(b, f);
+    if (art === "erh" && istFw) fz = `erst DURCH DIE STICHWORTERHÖHUNG zusätzlich alarmiert – NICHT in den ersten Satz. Nach der Erhöhung oder am Ende nennen, z. B. „Mit der Erhöhung wurde zusätzlich die ${b.name} alarmiert.“ oder „Unterstützt wurden wir dabei von der ${b.name}.“ Keine Fahrzeuge nennen.`;
+    if (art === "nach" && istFw) fz = `im weiteren Verlauf gezielt NACHALARMIERT – NICHT in den ersten Satz. ${b.fz.length ? `Hier das Fahrzeug mit Kurzbezeichnung nennen: ${b.fz.join(", ")} (z. B. „Im weiteren Verlauf wurde ${b.fz.length === 1 ? "das " + b.fz[0] : "die Fahrzeuge " + b.fz.join(" und ")} der ${b.name} nachalarmiert.“).` : `Formulierung z. B. „Im weiteren Verlauf wurde die ${b.name} nachalarmiert.“`}`;
     lines.push(`  - ${b.name} (${rolle}): ${fz}`);
   }
   const wehren = f.beteiligte.filter(b => /feuerwehr/i.test(b.name)).length;
@@ -931,7 +940,7 @@ function buildPrompt(f) {
   if (f.besonderheiten.trim()) lines.push(`- Lagebeschreibung (Stichpunkte in dieser Reihenfolge, als flüssigen Fließtext formulieren, nicht wörtlich übernehmen):\n${sortiereLage(f.besonderheiten.trim())}`);
   lines.push(f.fzNennen
     ? "- Fahrzeuge: nur wie oben erlaubt und allgemeinverständlich (z. B. „mit einem Löschfahrzeug“, „mit der Drehleiter“). Keine Kürzel, keine Listen."
-    : "- Fahrzeuge: KEINE einzelnen Fahrzeuge nennen – weder Typen noch Kürzel. Nur die Feuerwehren nennen.");
+    : "- Fahrzeuge: KEINE einzelnen Fahrzeuge nennen – weder Typen noch Kürzel. Nur die Feuerwehren nennen. Einzige Ausnahme: oben ausdrücklich als nachalarmiert markierte Fahrzeuge.");
   const LAENGE = `Länge und Form (verbindlich):
 - Höchstens 2.100 Zeichen inklusive Leerzeichen, niemals mehr als 2.200. Das ist eine Obergrenze, kein Ziel: Bei wenigen Stichpunkten darf und soll der Bericht deutlich kürzer sein. Ausführlich wird er nur durch echte Angaben.
 - Flüssig erzählen. Eine kurze Erklärung (höchstens ein Satz) ist nur erlaubt, wenn sie direkt zu einer angegebenen Maßnahme gehört (z. B. warum eine Wärmebildkamera eingesetzt wurde). KEINE allgemeinen Füllsätze über die Aufgaben der Feuerwehr, Bedeutung von Einsätzen, besonnenes Vorgehen o. Ä. KEINE neuen Fakten erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge, Zeiten oder Tätigkeiten).
@@ -1320,6 +1329,8 @@ const ACT = {
   keine: () => { S.form.keineWeiteren = !S.form.keineWeiteren; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   addwehr: t => { S.form.keineWeiteren = false; if (!S.form.beteiligte.some(b => b.name === t.dataset.name)) S.form.beteiligte.push({ name: t.dataset.name, fz: [], lead: false }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   removewehr: t => { S.form.beteiligte.splice(+t.dataset.i, 1); render(); },
+  setalarm: t => { const b = S.form.beteiligte[+t.dataset.i]; b.alarm = t.dataset.v; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  dupnach: t => { const b = S.form.beteiligte[+t.dataset.i]; S.form.beteiligte.splice(+t.dataset.i + 1, 0, { name: b.name, fz: [], lead: false, alarm: "nach" }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   togglefz: t => { const b = S.form.beteiligte[+t.dataset.i], v = t.dataset.v; b.fz = b.fz.includes(v) ? b.fz.filter(x => x !== v) : [...b.fz, v]; render(); },
   resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; render(); } },
   generate: () => generate(),
