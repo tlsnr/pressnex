@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1400";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-0935";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -205,7 +205,8 @@ window.addEventListener("pagehide", () => saveDraft());
 let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { hiddenAt = Date.now(); saveDraft(); }
-  else if (hiddenAt && Date.now() - hiddenAt > LOCK_AFTER_MS && S.user && getLock() && !S.locked) { S.locked = true; S.pin = ""; render(); }
+  else if (hiddenAt && Date.now() - hiddenAt > LOCK_AFTER_MS && S.user && getLock() && !S.locked) { S.locked = true; S.pin = ""; S.lockMsg = ""; S.bioTried = false; render(); }
+  else if (S.locked && getLock()?.bioId && !S.bioTried) render();
 });
 
 /* ---------- Auth ---------- */
@@ -351,6 +352,13 @@ function renderLock(el) {
     <button class="btn primary block" data-act="pinok">Entsperren</button>
     <button class="linkbtn" data-act="logout">PIN vergessen? Abmelden</button>
   </div></div>`;
+  // Face ID automatisch starten (einmal pro Sperre); klappt es nicht, bleibt einfach die PIN-Eingabe
+  if (lock?.bioId && !S.bioTried && !document.hidden) { S.bioTried = true; setTimeout(autoBio, 350); }
+}
+async function autoBio() {
+  if (!S.locked || document.hidden) return;
+  try { await bioVerify(getLock().bioId); S.locked = false; S.pin = ""; S.lockMsg = ""; render(); }
+  catch { if (S.locked && !S.pin) { S.lockMsg = "Face ID hat nicht geklappt – bitte PIN eingeben."; render(); } }
 }
 
 function renderShell(el) {
