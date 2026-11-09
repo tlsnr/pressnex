@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM } from "./data.js?v=20261109-1110";
+import { DEFAULT_STAMM } from "./data.js?v=20261109-1140";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -235,7 +235,7 @@ onAuthStateChanged(auth, async user => {
   S.loading = false; render();
 });
 
-const BAUSTEINE_VERSION = "20261109-1110";
+const BAUSTEINE_VERSION = "20261109-1140";
 async function loadConfig() {
   const [st, ki] = await Promise.all([getDoc(doc(db, "config", "stammdaten")), getDoc(doc(db, "config", "ki"))]);
   if (st.exists()) {
@@ -440,12 +440,12 @@ const ERK_SETS = {
     "Starke Rauchentwicklung im Gebäude", "Starke Rauchentwicklung sichtbar", "Rauch drang aus dem Dachbereich", "Rauch drang aus einem Fenster",
     "Flammen schlugen aus dem Fenster", "Feuerschein sichtbar", "Brannte bereits in voller Ausdehnung", "Feuer drohte auf ein Nachbargebäude überzugreifen",
     "Es befanden sich noch [#] {Person|Personen} im Gebäude"],
-  th: ["[#] {Person|Personen} eingeklemmt", "[#] {Person|Personen} im Fahrzeug eingeschlossen", "Mehrere Fahrzeuge beteiligt", "PKW auf der Seite / auf dem Dach",
+  th: ["[#] {Person|Personen} eingeklemmt", "[#] {Person|Personen} im Fahrzeug eingeschlossen", "[#] {Fahrzeug|Fahrzeuge} beteiligt", "PKW auf der Seite / auf dem Dach",
     "Betriebsstoffe liefen aus", "Rauchentwicklung am Fahrzeug", "Person in einer Notlage", "Person im Wasser", "Person im Aufzug eingeschlossen",
     "Gefahr durch herabstürzende Teile", "Baum drohte umzustürzen", "Fahrbahn blockiert", "Wasser in Gebäude eingedrungen", "[#] {Person|Personen} verletzt"],
   suche: ["Person weiterhin vermisst", "Gesuchte Person hilflos oder orientierungslos", "Hinweise auf den möglichen Aufenthaltsort", "Großes Gebiet abgesucht", "Waldstück abgesucht"],
-  gas: ["Gasgeruch wahrgenommen", "Austretender Stoff festgestellt", "Unbekannter Stoff ausgetreten", "Messgeräte schlugen an", "Personen klagten über Atemwegsreizungen", "[#] {Person|Personen} verletzt"],
-  manv: ["[#] {Person|Personen} verletzt", "[#] {Person|Personen} leicht verletzt", "[#] {Person|Personen} schwer verletzt", "Personen klagten über Atemwegsreizungen", "[#] {Person|Personen} eingeklemmt"]
+  gas: ["Gasgeruch wahrgenommen", "Austretender Stoff festgestellt", "Unbekannter Stoff ausgetreten", "Messgeräte schlugen an", "[#] {Person klagte|Personen klagten} über Atemwegsreizungen", "[#] {Person|Personen} verletzt"],
+  manv: ["[#] {Person|Personen} verletzt", "[#] {Person|Personen} leicht verletzt", "[#] {Person|Personen} schwer verletzt", "[#] {Person klagte|Personen klagten} über Atemwegsreizungen", "[#] {Person|Personen} eingeklemmt"]
 };
 function erkSet(f) {
   const st = aaoByCode(f.code2) || aaoByCode(f.code);
@@ -937,6 +937,7 @@ function buildPrompt(f) {
 - Flüssig erzählen. Eine kurze Erklärung (höchstens ein Satz) ist nur erlaubt, wenn sie direkt zu einer angegebenen Maßnahme gehört (z. B. warum eine Wärmebildkamera eingesetzt wurde). KEINE allgemeinen Füllsätze über die Aufgaben der Feuerwehr, Bedeutung von Einsätzen, besonnenes Vorgehen o. Ä. KEINE neuen Fakten erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge, Zeiten oder Tätigkeiten).
 - Gründe und Absichten nicht ausschmücken (z. B. nicht „um weitere Kräfte für eine drohende Brandausbreitung bereitzustellen“), nur die angegebenen Gründe nennen.
 - Den Bericht immer vollständig zu Ende schreiben.
+- Zahlen aus den Stichpunkten bis zwölf als Wort schreiben („ein Fahrzeug“, „zwei Personen“). Bei der Zahl 1 immer Einzahl verwenden.
 - Einzahl und Mehrzahl genau übernehmen: Ist von einer Person die Rede, niemals „Personen“ schreiben (z. B. „aufgrund einer vermissten Person“).
 - Bekannte Einheiten mit bestimmtem Artikel: „die Rettungshundestaffel“, „die DLRG“, „der Polizeihubschrauber“.
 
