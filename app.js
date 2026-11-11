@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261111-1100";
+import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261111-1145";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -299,7 +299,7 @@ function render() {
   renderShell(el);
 }
 
-const LOGO = `<img class="logo-mark" src="icon-192.png" alt="" width="40" height="40">`;
+const LOGO = `<img class="logo-mark" src="icon-192.png?v=2" alt="" width="40" height="40">`;
 function brand(dark) { return `<div class="brand ${dark ? "dark" : ""}">${LOGO}<div><span class="wordmark">Press<span>Nex</span></span><small>Berichte auf Knopfdruck</small></div></div>`; }
 
 function renderLogin(el) {
