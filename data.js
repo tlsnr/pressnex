@@ -8,6 +8,7 @@ export const DEFAULT_STAMM = {
   "Feuerwehr Brögbern",
   "Feuerwehr Holthausen"
  ],
+ "ortsteile": ["Innenstadt", "Altenlingen", "Baccum", "Biene", "Bramsche", "Brockhausen", "Brögbern", "Clusorth-Bramhar", "Damaschke", "Darme", "Estringen", "Gauerbach", "Hanekenfähr", "Holthausen", "Hüvede-Sommeringen", "Laxten", "Mundersum", "Münnigbüren", "Ramsel", "Reuschberge", "Schepsdorf", "Wachendorf"],
  "gruppen": [
   {
    "gruppe": "Stadt Lingen (Ems)",
@@ -1675,7 +1676,7 @@ export const VORLAGEN = [
       "[#] {Person|Personen} im Fahrzeug eingeschlossen|Wie viele Personen waren im Fahrzeug eingeschlossen?", "Polizei bereits vor Ort", "Rettungsdienst bereits vor Ort"],
     gefahr: ["## Gefahren", "Betriebsstoffe liefen aus", "Feuer drohte auf ein Gebäude überzugreifen", "Gefahr durch fließenden Verkehr", "Elektro- oder Hybridfahrzeug", "Gasflaschen im Fahrzeug", ...BED],
     mass: ["## Menschenrettung", "Umgehend Menschenrettung eingeleitet", ...LOESCHEN.slice(0, 5), "Mit dem Schnellangriff abgelöscht", "Im weiteren Einsatzverlauf Schaum eingesetzt",
-      "## Nach dem Löschen", "Motorhaube geöffnet", "Batterie abgeklemmt, Brandschutz sichergestellt", "Fahrzeug mit Wasser gekühlt", "Kontrolle mit der Wärmebildkamera",
+      "## Nach dem Löschen", "Gasflaschen gekühlt", "Gasflaschen aus dem Gefahrenbereich gebracht", "Motorhaube geöffnet", "Batterie abgeklemmt, Brandschutz sichergestellt", "Fahrzeug mit Wasser gekühlt", "Kontrolle mit der Wärmebildkamera",
       "Auslaufende Betriebsstoffe abgestreut", "Straße für die Dauer des Einsatzes gesperrt"],
     pers: PERS, ende: ABSCHL_BRAND },
   { id: "flaeche", name: "Flächen- / Waldbrand", match: /Fläche|^F\d[XY]?_Bahn/,
@@ -1702,7 +1703,7 @@ export const VORLAGEN = [
       "[#] {Person|Personen} über die Drehleiter gerettet|Wie viele Personen wurden über die Drehleiter gerettet?",
       "[#] {Person|Personen} über tragbare Leitern gerettet|Wie viele Personen wurden über tragbare Leitern gerettet?",
       "[#] {Person|Personen} durch den Angriffstrupp aus dem Gebäude gerettet|Wie viele Personen hat der Angriffstrupp aus dem Gebäude gerettet?", "Haustier aus der Wohnung gerettet",
-      ...LOESCHEN, ...WASSER,
+      ...LOESCHEN, "Gasflaschen gekühlt", "Gasflaschen aus dem Gefahrenbereich gebracht", ...WASSER,
       "## Schutz & Lüften", "Gebäude vorsorglich geräumt", "Nachbarwohnungen kontrolliert", "[#] {Wohnungstür|Wohnungstüren} gewaltsam geöffnet|Wie viele Wohnungstüren wurden gewaltsam geöffnet?",
       "[#] {Wohnung|Wohnungen} mit der Wärmebildkamera abgesucht|Wie viele Wohnungen wurden mit der Wärmebildkamera abgesucht?", "Treppenraum rauchfrei gehalten",
       "Gebäude mit dem Überdrucklüfter entraucht", "Messung auf Kohlenmonoxid durchgeführt", "Strom und Gas abgestellt", "Straße für die Dauer des Einsatzes gesperrt", "Bevölkerungswarnung ausgelöst",

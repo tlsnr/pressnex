@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261109-1305";
+import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261111-1030";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -119,7 +119,7 @@ function newForm() {
     datum: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     uhrzeit: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     code: "", klartext: "", ort: "", adresse: "", besonderheiten: "",
-    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [], keineWeiteren: false, vorlage: "", nichts: {},
+    code2: "", erhWann: "", erhGruende: [], erhFrei: "", erhOpen: false, skipQ: [], keineWeiteren: false, vorlage: "", nichts: {}, kanal: "instagram",
     beteiligte: [], ausschreiben: false, fzNennen: false
   };
 }
@@ -235,7 +235,7 @@ onAuthStateChanged(auth, async user => {
   S.loading = false; render();
 });
 
-const BAUSTEINE_VERSION = "20261109-1300";
+const BAUSTEINE_VERSION = "20261111-1000";
 async function loadConfig() {
   const [st, ki] = await Promise.all([getDoc(doc(db, "config", "stammdaten")), getDoc(doc(db, "config", "ki"))]);
   if (st.exists()) {
@@ -254,7 +254,7 @@ let draftTimer = null, lastDraft = "";
 function saveDraft() {
   if (!S.user || !S.profile) return;
   const leer = formLeer(S.form) && !S.result;
-  const data = leer ? null : { form: S.form, result: S.result, editId: S.editId, step: S.step, ts: Date.now() };
+  const data = leer ? null : { form: S.form, result: S.result, texte: S.texte || {}, eigenSec: S.eigenSec || {}, editId: S.editId, step: S.step, ts: Date.now() };
   const sig = JSON.stringify(data && { ...data, ts: 0 });
   if (sig === lastDraft) return;
   lastDraft = sig;
@@ -267,7 +267,7 @@ function saveDraft() {
     } catch (e) { console.warn("Entwurf", e); }
   }, data ? 2500 : 0);
 }
-function clearDraft() { lastDraft = ""; S.form = newForm(); S.result = null; S.editId = null; S.step = 1; saveDraft(); }
+function clearDraft() { lastDraft = ""; S.form = newForm(); S.result = null; S.texte = {}; S.eigenSec = {}; S.editId = null; S.step = 1; saveDraft(); }
 async function loadDraft() {
   let best = null;
   try { const l = JSON.parse(localStorage.getItem(draftKey()) || "null"); if (l) best = l; } catch {}
@@ -276,7 +276,7 @@ async function loadDraft() {
     if (r.exists()) { const d = JSON.parse(r.data().json); if (!best || d.ts > best.ts) best = d; }
   } catch (e) { console.warn("Entwurf laden", e); }
   if (best && best.form) {
-    S.form = { ...newForm(), ...best.form }; if (!Array.isArray(S.form.erhGruende)) S.form.erhGruende = []; S.result = best.result || null; S.editId = best.editId || null; S.step = best.step || 1;
+    S.form = { ...newForm(), ...best.form }; if (!Array.isArray(S.form.erhGruende)) S.form.erhGruende = []; S.result = best.result || null; S.texte = best.texte || {}; S.eigenSec = best.eigenSec || {}; S.editId = best.editId || null; S.step = best.step || 1;
     lastDraft = JSON.stringify({ ...best, ts: 0 });
     S.draftRestored = true;
   }
@@ -500,7 +500,7 @@ function viewNeu(main) {
     </div>
     ${st ? `<label class="f">Stichwort im Bericht <span class="hint inline">änderbar</span><input type="text" data-bind="klartext" value="${esc(f.klartext)}"></label>` : ""}
     ${st ? erhBlock(f) : ""}
-    <label class="f">Ort / Ortsteil <span class="hint inline">erscheint im Bericht</span><input type="text" data-bind="ort" value="${esc(f.ort)}" placeholder="z. B. Laxten"></label>
+    <label class="f">Ort / Ortsteil <span class="hint inline">erscheint im Bericht</span><div class="picker"><input type="text" data-bind="ort" data-search="ort" value="${esc(f.ort)}" placeholder="Ortsteil wählen oder eingeben" autocomplete="off"><div class="picklist hidden"></div></div></label>
     <label class="f"><span>Einsatzadresse <span class="lock-note">🔒 nur intern</span></span><input type="text" data-bind="adresse" value="${esc(f.adresse)}" placeholder="Nie im Bericht, nie an die KI"></label>
     <button type="button" class="btn next" data-act="nextstep" data-n="2">Weiter</button>`;
 
@@ -523,6 +523,7 @@ function viewNeu(main) {
 
   const body4 = `${gefuehrtPanel(f)}
     <div id="rqbox">${rueckfragenHtml(f)}</div>
+    <div class="kanal-wrap"><span class="flabel">Bericht für</span>${kanalChips("kanal")}</div>
     <textarea id="lage" data-bind="besonderheiten" rows="6" placeholder="Stichpunkte antippen oder selbst schreiben – die KI erfindet nichts dazu.">${esc(f.besonderheiten)}</textarea>
     <label class="check"><input type="checkbox" data-bind="fzNennen" ${f.fzNennen ? "checked" : ""}> Fahrzeuge im Bericht erwähnen <span class="hint inline">(sonst nur die Feuerwehren)</span></label>`;
 
@@ -656,11 +657,13 @@ const TAB_SEC = { "Was brennt": "lage", "Lage": "lage", "Erste Maßnahmen": "mas
 const GRP_SEC = { "Lage|Bedingungen": "gefahr", "Technische Hilfe|Lage vor Ort": "lage", "Gefahrgut|Lage": "lage", "Personen|Andere Organisationen": "ende" };
 let klassIdx = null, klassKey = "";
 function klassIndex() {
-  const v = vorlageFuer(S.form), key = v.id + "|" + (S.stamm.bausteine || []).length;
+  const v = vorlageFuer(S.form), key = v.id + "|" + (S.stamm.bausteine || []).length + "|" + JSON.stringify(S.stamm.eigeneStp || {}).length + "|" + Object.keys(S.eigenSec || {}).length;
   if (klassIdx && klassKey === key) return klassIdx;
   const out = [], secI = id => ABSCHNITTE.findIndex(a => a.id === id);
   const addV = (vl, off) => ABSCHNITTE.forEach((a, si) => (vl[a.id] || []).forEach((p, j) => { if (!p.startsWith("## ")) out.push({ re: tplRegex(tplSplit(p).t), sec: a.id, rang: si * 1e5 + off + j }); }));
   addV(v, 0);
+  ABSCHNITTE.forEach((a, si) => ((S.stamm.eigeneStp || {})[a.id] || []).forEach((p, j) => out.push({ re: tplRegex(tplSplit(p).t), sec: a.id, rang: si * 1e5 + 900 + j })));
+  Object.entries(S.eigenSec || {}).forEach(([txt, sec], j) => { const si = ABSCHNITTE.findIndex(a => a.id === sec); out.push({ re: tplRegex(txt), sec, rang: si * 1e5 + 950 + j }); });
   VORLAGEN.forEach((vl, k) => { if (vl !== v) addV(vl, 1000 + k * 200); });
   (S.stamm.bausteine || []).forEach((tab, ti) => { let grp = ""; tab.punkte.forEach((p, j) => {
     if (p.startsWith("## ")) { grp = p.slice(3); return; }
@@ -709,6 +712,9 @@ function gefuehrtPanel(f) {
         const { t, q } = tplSplit(p); chips += chipHtml(t, q, zeilen, /^Es brannte:\s*/);
       }
       if (chips) h += `<div class="chips">${chips}</div>`;
+      const eigene = ((S.stamm.eigeneStp || {})[a.id] || []);
+      if (eigene.length) h += `<div class="sec-grp">Eigene Stichpunkte</div><div class="chips">${eigene.map(p => { const { t, q } = tplSplit(p); return chipHtml(t, q, zeilen); }).join("")}</div>`;
+      h += `<div class="eigen-add"><input type="text" id="eigen-${a.id}" placeholder="Eigenen Stichpunkt eingeben" autocomplete="off"><button type="button" class="btn small" data-act="eigenadd" data-v="${a.id}">Hinzufügen</button>${S.profile?.rolle === "admin" ? `<button type="button" class="btn small ghostbtn" data-act="eigenmerken" data-v="${a.id}" title="Für alle dauerhaft in diesem Abschnitt anbieten">+ dauerhaft</button>` : ""}</div>`;
       const next = ABSCHNITTE[i + 1];
       h += `<div class="sec-foot">${a.nichts ? `<button type="button" class="chip small keine-btn ${st.nichts ? "on" : ""}" data-act="secnichts" data-v="${a.id}">${st.nichts ? "✓ " : ""}${esc(a.nichts)}</button>` : "<span></span>"}
         ${next ? `<button type="button" class="btn next small" data-act="secopen" data-v="${next.id}">Weiter: ${esc(next.titel.split(" ")[0])}</button>` : ""}</div></div>`;
@@ -776,6 +782,10 @@ function rueckfragen(f) {
     add("erk", "Was haben die ersteintreffenden Kräfte festgestellt?", [{ label: "Feststellung auswählen", act: "qerk" }], "Grund der Stichworterhöhung war die Lageerkundung.");
     if (out.length) out[out.length - 1].noPop = true;
   }
+  if (has(/^gasflaschen im (brandbereich|fahrzeug)$/i) && !has(/^gasflaschen (gekühlt|aus dem gefahrenbereich)/i))
+    add("gas", "Was geschah mit den Gasflaschen?", [
+      { label: "Gasflaschen gekühlt", act: "qline", line: "Gasflaschen gekühlt" },
+      { label: "Aus dem Gefahrenbereich gebracht", act: "qline", line: "Gasflaschen aus dem Gefahrenbereich gebracht" }]);
   if (f.code2 && !f.erhWann)
     add("erhWann", "Wann wurde das Stichwort erhöht?", [
       { label: "Auf der Anfahrt", act: "qset", k: "erhWann", v: "auf der Anfahrt" },
@@ -839,13 +849,69 @@ function fmtTimer() {
   const ms = Date.now() - (S.busyStart || Date.now()), sec = Math.floor(ms / 1000);
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")},${Math.floor((ms % 1000) / 100)}`;
 }
-function counter(t) { const n = [...t].length; return `<b style="color:${n > 2200 ? "var(--red)" : n > 2000 ? "var(--warn)" : "var(--ok)"}">${n.toLocaleString("de-DE")} / 2.200 Zeichen</b> (Instagram-Grenze)${n > 2200 ? " – bitte kürzen" : ""}`; }
+const KANAELE = {
+  instagram: { name: "Instagram", max: 2200, regel: "Kanal: Instagram-Beitrag. Höchstens 2.100 Zeichen, niemals mehr als 2.200 (harte Grenze). Keine Überschrift, keine Hashtags, keine Emojis. Gut lesbare Absätze." },
+  facebook: { name: "Facebook", max: 2600, regel: "Kanal: Facebook-Beitrag. Höchstens 2.500 Zeichen. Keine Überschrift, keine Hashtags, keine Emojis. Gut lesbare Absätze." },
+  presse: { name: "Pressemitteilung", max: 3200, regel: "Kanal: Pressemitteilung für die Zeitung. Erste Zeile = sachliche Überschrift (ohne Punkt am Ende), dann eine Leerzeile, dann der Text. Dritte Person statt Wir-Perspektive (z. B. „Die Feuerwehr Lingen wurde … alarmiert“). Nüchtern und präzise, 1.200 bis 3.000 Zeichen. KEINE Ansprechpartner, Zitate oder Kontaktdaten erfinden." },
+  website: { name: "Website", max: 3000, regel: "Kanal: Einsatzbericht für die Feuerwehr-Website. Erste Zeile = kurze Überschrift (ohne Punkt am Ende), dann eine Leerzeile, dann der Text. Wir-Perspektive, sachlich, 800 bis 2.500 Zeichen." },
+  whatsapp: { name: "WhatsApp", max: 700, regel: "Kanal: Kurzmeldung für WhatsApp. Nur 2 bis 4 kurze Sätze, höchstens 600 Zeichen: was, wann, wo, wichtigstes Ergebnis. Keine Überschrift, keine Emojis." }
+};
+const kanalVon = () => KANAELE[S.form.kanal] ? S.form.kanal : "instagram";
+function counter(t) {
+  const k = KANAELE[(S.result && S.result.kanal) || kanalVon()], n = [...t].length;
+  if (k.name !== "Instagram") return `<b style="color:${n > k.max ? "var(--warn)" : "var(--ok)"}">${n.toLocaleString("de-DE")} Zeichen</b> (${k.name})`;
+  return `<b style="color:${n > 2200 ? "var(--red)" : n > 2000 ? "var(--warn)" : "var(--ok)"}">${n.toLocaleString("de-DE")} / 2.200 Zeichen</b> (Instagram-Grenze)${n > 2200 ? " – bitte kürzen" : ""}`; }
+// Regelbasierter Abgleich des KI-Textes mit den Eingaben (Hilfsmittel, keine Garantie)
+const ZAHLWORT = { ein: 1, eine: 1, einen: 1, einem: 1, einer: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10, elf: 11, zwölf: 12 };
+const HEIKEL = [
+  [/\b(euro|€|schadenshöhe|sachschaden in höhe|schaden von)\b/i, "Schadenssumme"],
+  [/\b(brandursache|ursache (war|ist|dürfte))\b/i, "Ursache"],
+  [/\b(notarzt|notärztin)\b/i, "Notarzt"], [/\bhubschrauber\b/i, "Hubschrauber"], [/\bdrehleiter\b/i, "Drehleiter"],
+  [/\b(verletzt|verletzte|verletzten)\b/i, "Verletzte"], [/\b(verstorben|verstarb|tot|leblos)\b/i, "Todesfall"],
+  [/\bwärmebildkamera\b/i, "Wärmebildkamera"], [/\bschaum\b/i, "Schaum"], [/\b(atemschutz)\b/i, "Atemschutz"],
+  [/\b(gesperrt|sperrung|vollsperrung)\b/i, "Sperrung"], [/\b(evakuiert|geräumt|räumung)\b/i, "Räumung"],
+  [/\b(polizei)\b/i, "Polizei"], [/\b(rettungsdienst|rettungswagen)\b/i, "Rettungsdienst"]
+];
+function faktencheck(text, f) {
+  if (!text) return [];
+  const quelle = [f.besonderheiten, f.klartext, f.code, f.code2, f.ort, f.uhrzeit, f.datum, f.erhGruende.join(" "), f.erhFrei,
+    f.beteiligte.map(b => `${b.name} ${(b.fz || []).join(" ")} ${(b.fz || []).map(fzAllgemein).join(" ")} ${Object.values(b.anz || {}).join(" ")}`).join(" ")].join(" \n ").toLowerCase();
+  const out = [], seen = new Set(), add = (wort, grund) => { const k = wort.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push({ wort, grund }); } };
+  const body = text.replace(/\n\n\/[a-zäöü]+\s*$/i, "");
+  // Zahlen (Ziffern), außer Uhrzeit/Datum/Stichwort
+  // Zahlen nur aus den inhaltlichen Angaben (nicht aus Stichwort, Datum, Uhrzeit, Fahrzeugnormen)
+  const inhalt = [f.besonderheiten, f.erhFrei, f.ort, f.beteiligte.map(b => Object.values(b.anz || {}).join(" ")).join(" ")].join(" ").toLowerCase();
+  const zahlenQuelle = new Set([...(inhalt.match(/\d+/g) || []).map(x => String(Number(x))), ...(f.uhrzeit.match(/\d+/g) || []).map(x => String(Number(x)))]);
+  for (const m of body.matchAll(/\b\d+([.,:]\d+)?\b/g)) { const z = String(Number(m[0].split(/[.,:]/)[0])); if (!zahlenQuelle.has(z) && !/^\d{1,2}:\d{2}$/.test(m[0])) add(m[0], "Zahl nicht in den Angaben"); }
+  // Zahlwörter > 1
+  for (const m of body.toLowerCase().matchAll(/\b(zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b/g)) { const n = String(ZAHLWORT[m[1]]); if (!zahlenQuelle.has(n) && !inhalt.includes(m[1])) add(m[1], "Anzahl nicht in den Angaben"); }
+  // Feuerwehren
+  const wehren = new Set([...S.stamm.eigene, ...(S.stamm.gruppen || []).flatMap(g => g.wehren || [])].filter(x => typeof x === "string" && /^Feuerwehr /.test(x)));
+  for (const w of wehren) { const kurz = w.replace(/^Feuerwehr\s+/, ""); if (kurz.length > 3 && new RegExp(`\\b${kurz.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(body) && !quelle.includes(kurz.toLowerCase())) add(w, "Feuerwehr nicht als beteiligt angegeben"); }
+  // Fahrzeugkürzel
+  for (const v of (S.stamm.fahrzeuge || [])) { const kz = v.kurz || v; if (typeof kz === "string" && kz.length >= 2 && new RegExp(`\\b${kz.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\b`).test(body) && !quelle.includes(kz.toLowerCase())) add(kz, "Fahrzeug nicht angegeben"); }
+  // heikle Begriffe
+  for (const [re, name] of HEIKEL) { const m = body.match(re); if (m && !re.test(quelle) && !(name === "Verletzte" && /niemand wurde verletzt|keine verletzt/i.test(body))) add(m[0], `„${name}“ steht nicht in deinen Angaben`); }
+  return out.slice(0, 12);
+}
+function kanalChips(act) {
+  const cur = (act === "kanalwechsel" && S.result?.kanal) || kanalVon();
+  return `<div class="kanal" role="group" aria-label="Kanal">${Object.entries(KANAELE).map(([k, v]) =>
+    `<button type="button" class="${k === cur ? "on" : ""}" data-act="${act}" data-v="${k}" aria-pressed="${k === cur}">${v.name}${act === "kanalwechsel" && S.texte?.[k] && k !== cur ? " ✓" : ""}</button>`).join("")}</div>`;
+}
 function resultCard() {
+  const k = KANAELE[S.result.kanal || "instagram"], fc = faktencheck(S.result.text, S.form);
   return `<section class="card result-card" id="result">
-    <div class="row" style="justify-content:space-between;align-items:center"><h2>Vorschau Social-Media-Bericht</h2><span class="tag ok">Entwurf</span></div>
-    <p class="hint">Von der KI erstellt – bitte prüfen und bei Bedarf direkt hier ändern.</p>
+    <div class="row" style="justify-content:space-between;align-items:center"><h2>Vorschau · ${k.name}</h2><span class="tag ok">Entwurf</span></div>
+    <p class="hint">Von der KI erstellt – bitte prüfen und bei Bedarf direkt hier ändern.${S.result.dauer ? ` Erstellt in ${S.result.dauer} s mit ${esc(MODELL_NAME[S.result.modell] || S.result.modell || "")}.` : ""}</p>
+    ${fc.length ? `<div class="fc"><div class="fc-head"><span class="rq-ico">!</span><b>Faktencheck: bitte prüfen</b></div>
+      <p class="hint">Diese Stellen stehen so nicht in deinen Angaben. Der Check ist ein Hilfsmittel und ersetzt nicht das Gegenlesen.</p>
+      <ul>${fc.map((x, i) => `<li><mark>${esc(x.wort)}</mark> – ${esc(x.grund)} <button type="button" class="linkbtn small fc-del" data-act="fcdel" data-i="${i}">Satz entfernen</button></li>`).join("")}</ul></div>`
+    : `<p class="fc-ok">✓ Faktencheck: keine Auffälligkeiten gefunden – trotzdem gegenlesen.</p>`}
     <textarea class="big" data-bind-result="text">${esc(S.result.text)}</textarea>
     <p class="hint" id="cc">${counter(S.result.text)}</p>
+    ${S.undoText ? `<button type="button" class="linkbtn small" data-act="fcundo">↶ Entfernten Satz zurückholen</button>` : ""}
+    <div class="kanal-wrap"><span class="flabel">Für anderen Kanal umschreiben</span>${kanalChips("kanalwechsel")}</div>
     <div class="row">
       <button class="btn" data-act="copyresult">Text kopieren</button>
       <button class="btn" data-act="generate" ${S.busy ? "disabled" : ""}>Neu formulieren</button>
@@ -1015,7 +1081,11 @@ function buildPrompt(f) {
     if (art === "erh" && istFw) fz = `erst DURCH DIE STICHWORTERHÖHUNG zusätzlich alarmiert – NICHT in den ersten Satz. Nach der Erhöhung oder am Ende nennen, z. B. „Mit der Erhöhung wurde zusätzlich die ${b.name} alarmiert.“ oder „Unterstützt wurden wir dabei von der ${b.name}.“ Keine Fahrzeuge nennen.`;
     const typen = [...new Set(b.fz.map(fzTyp))];
     if (art === "nach" && istFw) fz = `im weiteren Verlauf gezielt NACHALARMIERT – NICHT in den ersten Satz. ${typen.length ? `Das Fahrzeug NUR mit dieser Kurzbezeichnung ohne Zahlen nennen: ${typen.join(", ")} (z. B. „Im weiteren Verlauf wurde ${typen.length === 1 ? "das " + typen[0] : "die Fahrzeuge " + typen.join(" und ")} der ${b.name} nachalarmiert.“). Keine Normbezeichnung wie „LF 8/6“ oder „HLF 20“.` : `Formulierung z. B. „Im weiteren Verlauf wurde die ${b.name} nachalarmiert.“`}`;
-    if (!istFw && b.fz.length) fz = `darf allgemein genannt werden: mit ${fzGruppe(fzListe(b), false)}`;
+    if (!istFw && b.fz.length) {
+      // Anzahl nur erwähnenswert ab zwei gleichen Fahrzeugen; Rettungshubschrauber mit Namen
+      const mehr = b.fz.filter(v => ((b.anz || {})[v] || 1) >= 2 || /christoph/i.test(v));
+      fz = mehr.length ? `darf kurz genannt werden: ${mehr.map(v => /christoph/i.test(v) ? v.replace(/^RTH\s*/, "Rettungshubschrauber ") : `${b.anz[v]} × ${fzAllgemein(v)}`).join(", ")} (übrige Fahrzeuge dieser Organisation nicht nennen)` : "nur die Organisation nennen, KEINE Fahrzeuge und keine Anzahl";
+    }
     lines.push(`  - ${b.name} (${rolle}): ${fz}`);
   }
   const wehren = f.beteiligte.filter(b => /feuerwehr/i.test(b.name)).length;
@@ -1031,6 +1101,11 @@ function buildPrompt(f) {
 - Gründe und Absichten nicht ausschmücken (z. B. nicht „um weitere Kräfte für eine drohende Brandausbreitung bereitzustellen“), nur die angegebenen Gründe nennen.
 - Den Bericht immer vollständig zu Ende schreiben.
 - Kein „rund“, „etwa“ oder „circa“ vor Zahlen oder Zeiten aus den Stichpunkten („Nach drei Stunden …“).
+- Gefahren und Besonderheiten (z. B. Gasflaschen, Photovoltaikanlage, Wind) NIE als Begründung für eine Maßnahme darstellen, außer es steht ausdrücklich so in den Stichpunkten. Richtig: „Erschwerend befanden sich Gasflaschen im Brandbereich.“ Falsch: „Da sich Gasflaschen im Brandbereich befanden, wurde die Brandbekämpfung eingeleitet.“
+- Kurze, klare Sätze: höchstens etwa 25 Wörter, ein Gedanke pro Satz. Nicht mehrere Maßnahmen in einen Satz packen (Trupps, Seiten und Strahlrohre lieber auf zwei Sätze verteilen).
+- Kein Wort in zwei aufeinanderfolgenden Sätzen wiederholen (z. B. „bereits“, „Brandbekämpfung“, „Glutnester“) – Synonyme oder Umstellung verwenden.
+- Die Reihenfolge der Stichpunkte STRIKT einhalten. Maßnahmen wie eine Straßensperrung stehen bei den Maßnahmen, nicht hinter den Verletzten.
+- Brandursache und Ermittlungen der Polizei immer als eigener, kurzer Satz am Ende, z. B. „Die Polizei hat die Ermittlungen zur Brandursache aufgenommen.“ Nicht als Nebensatz an andere Kräfte hängen.
 - Die Lage beim Eintreffen aktiv und einfach schildern, z. B. „Vor Ort waren zwei PKW beteiligt, eine Person war eingeklemmt.“ – nicht „waren … vorgefunden worden“.
 - Rettungsdienst, Polizei und Rettungshubschrauber in EINEM kurzen Satz nennen, z. B. „Ebenfalls im Einsatz waren der Rettungsdienst mit zwei Rettungswagen und einem Notarzt, der Rettungshubschrauber Christoph Europa 2 sowie die Polizei.“ Keine Nebensätze wie „der im Einsatz war“.
 - Verletzte: „… wurden in ein Krankenhaus gebracht“ – nicht „nach dem Transport ins Krankenhaus übergeben“.
@@ -1052,7 +1127,8 @@ Formulierungsregeln (verbindlich):
 - Rettungsdienst, Polizei und andere Organisationen nur als anwesend nennen (z. B. „Ebenfalls vor Ort waren der Rettungsdienst und die Polizei.“). Was sie getan haben, NUR schreiben, wenn es als Stichpunkt angegeben ist. Bei Verletzten genügt „… an den Rettungsdienst übergeben“; Erstversorgung, Betreuung oder Transport nur, wenn angegeben. Immer einfach „der Rettungsdienst“ – nie „medizinisches Fachpersonal“ o. Ä.
 - Verboten: „Nach dem Ende aller Arbeiten“, „bei den Maßnahmen eingebunden“, „diese spezielle Technik“, „Schutzabstand“, „Hand in Hand“, „medizinisches Fachpersonal“, „von zentraler Bedeutung“, „Zusammenarbeit verlief reibungslos“.
 - Wortwiederholungen vermeiden, besonders „eingeleitet“, „Personen“ und „Einsatzstelle“; Satzanfänge abwechseln.`;
-  let p = `${S.ki.stil}\n\n${HARD_RULES}\n\n${LAENGE}\n\n${lines.join("\n")}`;
+  const kanal = KANAELE[kanalVon()];
+  let p = `${S.ki.stil}\n\n${HARD_RULES}\n\n${LAENGE}\n\nKANAL (hat Vorrang vor allen Längen- und Formangaben oben):\n- ${kanal.regel}\n\n${lines.join("\n")}`;
   if ((S.ki.beispiele || "").trim()) p += `\n\nBEISPIELBERICHTE (nur für Stil und Aufbau, keine Inhalte übernehmen):\n${S.ki.beispiele.trim()}`;
   return p;
 }
@@ -1118,16 +1194,17 @@ async function generate() {
       text = (r.response.text() || "").trim().replace(/^```[a-z]*\n?|```$/g, "").trim();
       // Abgeschnittene Antwort erkennen (Token-Limit / Abbruch) → neu versuchen bzw. nächstes Modell
       const fin = r.response.candidates?.[0]?.finishReason;
-      const unvollstaendig = t => !t || fin === "MAX_TOKENS" || !/[.!?“"»)]\s*$/.test(t) || [...t].length < 180;
+      const unvollstaendig = t => !t || fin === "MAX_TOKENS" || !/[.!?“"»)]\s*$/.test(t) || [...t].length < (kanalVon() === "whatsapp" ? 60 : 180);
       if (unvollstaendig(text)) {
         console.warn("KI-Text unvollständig", m, fin, text.slice(-40));
         if (!teilText || [...text].length > [...teilText].length) teilText = text;
         text = ""; continue;
       }
-      if (text && [...text].length > 2190) {
+      const kmax = KANAELE[kanalVon()].max - 10;
+      if (text && [...text].length > kmax) {
         S.busyInfo = "Ich kürze den Text auf Instagram-Länge …"; render();
         try {
-          const r2 = await model.generateContent(`Kürze den folgenden Einsatzbericht auf 1.900 bis 2.100 Zeichen (inklusive Leerzeichen). Stil, Absätze und alle wichtigen Fakten beibehalten, nichts hinzufügen. Gib nur den gekürzten Text aus.\n\n${text}`);
+          const r2 = await model.generateContent(`Kürze den folgenden Einsatzbericht auf höchstens ${Math.round(kmax * 0.92).toLocaleString("de-DE")} Zeichen (inklusive Leerzeichen). Stil, Absätze und alle wichtigen Fakten beibehalten, nichts hinzufügen. Gib nur den gekürzten Text aus.\n\n${text}`);
           const k = (r2.response.text() || "").trim();
           if (k && [...k].length < [...text].length) text = k;
         } catch (e) { console.warn("Kürzen", e); }
@@ -1147,7 +1224,10 @@ async function generate() {
     render(); return;
   }
   text = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
-  S.result = { text: `${text}\n\n/${S.profile.kuerzel.toLowerCase()}` };
+  const sig = kanalVon() === "presse" ? "" : `\n\n/${S.profile.kuerzel.toLowerCase()}`;
+  S.result = { text: `${text}${sig}`, kanal: kanalVon(), modell: genutzt, dauer: dauer };
+  S.texte = { ...(S.texte || {}), [kanalVon()]: S.result.text };
+  try { console.info("PressNex KI", { modell: genutzt, sekunden: dauer, kanal: kanalVon() }); } catch {}
   S.scrollResult = true;
   if (unvollst) S.error = "Die KI hat den Text nicht ganz zu Ende geschrieben. Bitte „Neu formulieren“ tippen oder das Ende selbst ergänzen.";
   else toast(`Bericht in ${dauer} Sekunden erstellt · ${MODELL_NAME[genutzt] || genutzt}`);
@@ -1167,6 +1247,8 @@ async function saveReport() {
       hauptfeuerwehr: d.lead.name, eigenerEinsatz: d.eigen, anforderungen: d.anfo,
       beteiligte: f.beteiligte.map(b => ({ name: b.name, fz: b.fz, lead: !!b.lead })),
       ausschreiben: f.ausschreiben, fzNennen: !!f.fzNennen, text: S.result.text,
+      kanal: S.result.kanal || "instagram", texte: { ...(S.texte || {}), [S.result.kanal || "instagram"]: S.result.text },
+      kiModell: S.result.modell || "", kiDauer: S.result.dauer || "", ortsteil: f.ort.trim(),
       geaendert: serverTimestamp()
     };
     if (S.editId) await updateDoc(doc(db, "berichte", S.editId), daten);
@@ -1261,8 +1343,26 @@ async function viewProfil(main) {
 }
 
 /* ---------- Ansicht: Verwaltung ---------- */
+function kiStatistik() {
+  if (!S.berichte) return `<p class="hint">Wird geladen …</p>`;
+  const mit = S.berichte.filter(b => b.kiModell && b.kiDauer);
+  if (!mit.length) return `<p class="hint">Noch keine Daten. Ab jetzt wird bei jedem gespeicherten Bericht festgehalten, welches Modell ihn wie schnell geschrieben hat.</p>`;
+  const sek = b => Number(String(b.kiDauer).replace(",", ".")) || 0, g = {};
+  for (const b of mit) (g[b.kiModell] = g[b.kiModell] || []).push(sek(b));
+  const med = a => { const x = [...a].sort((p, q) => p - q); return x.length % 2 ? x[(x.length - 1) / 2] : (x.at(x.length / 2 - 1) + x.at(x.length / 2)) / 2; };
+  const f1 = n => n.toFixed(1).replace(".", ",");
+  return `<p class="hint">Aus ${mit.length} gespeicherten Berichten. Der Median ist die typische Dauer, Ausreißer zählen weniger.</p>
+    <div class="tablewrap"><table class="mini"><thead><tr><th>Modell</th><th>Berichte</th><th>Median</th><th>Längster</th></tr></thead><tbody>
+    ${Object.entries(g).sort((a, b) => b[1].length - a[1].length).map(([m, a]) => `<tr><td>${esc(MODELL_NAME[m] || m)}</td><td>${a.length}</td><td>${f1(med(a))} s</td><td>${f1(Math.max(...a))} s</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
 async function viewAdmin(main) {
   if (S.profile.rolle !== "admin") { S.view = "neu"; return render(); }
+  if (!S.berichte && !S.berichteLaden) {
+    S.berichteLaden = true;
+    getDocs(query(collection(db, "berichte"), orderBy("ts", "desc"))).then(snap => { S.berichte = snap.docs.map(x => ({ id: x.id, ...x.data() })); })
+      .catch(() => { S.berichte = []; }).finally(() => { S.berichteLaden = false; if (S.view === "admin") render(); });
+  }
   if (!S.admin.users) {
     try { S.admin.users = (await getDocs(collection(db, "users"))).docs.map(x => ({ uid: x.id, ...x.data() })); }
     catch (e) { S.admin.users = []; toast("Nutzerliste nicht ladbar"); }
@@ -1285,6 +1385,8 @@ async function viewAdmin(main) {
     </section>
     <section class="card"><h2>Stammdaten</h2>
       <p class="hint">Format: JSON. Vorsichtig bearbeiten – Kommas und Anführungszeichen müssen stimmen.</p>
+      <label class="f">Ortsteile (einer pro Zeile)<textarea class="code" id="sd-ortsteile">${esc((st.ortsteile || DEFAULT_STAMM.ortsteile || []).join("\n"))}</textarea></label>
+      <label class="f">Eigene Stichpunkte je Abschnitt (lage, gefahr, mass, pers, ende)<textarea class="code" id="sd-eigeneStp">${esc(JSON.stringify(st.eigeneStp || {}, null, 1))}</textarea></label>
       <label class="f">Eigene Ortsfeuerwehren<textarea class="code" id="sd-eigene">${esc(JSON.stringify(st.eigene, null, 1))}</textarea></label>
       <label class="f">Fahrzeuge der eigenen Ortsfeuerwehren<textarea class="code" id="sd-eigeneFahrzeuge">${esc(JSON.stringify(st.eigeneFahrzeuge, null, 1))}</textarea></label>
       <label class="f">Feuerwehren (Gruppen)<textarea class="code" id="sd-gruppen">${esc(JSON.stringify(st.gruppen, null, 1))}</textarea></label>
@@ -1294,8 +1396,14 @@ async function viewAdmin(main) {
       <div class="row"><button class="btn dark" data-act="savestamm">Stammdaten speichern</button><button class="btn" data-act="resetstamm">Standard wiederherstellen</button></div>
     </section>
     <section class="card"><h2>Sicherung</h2>
-      <p class="hint">Lädt alle Berichte als Datei herunter (inkl. interner Adressen – sicher aufbewahren).</p>
-      <button class="btn" data-act="export">Alle Berichte exportieren</button>
+      <p class="hint">Lädt alle Berichte, Nutzerprofile und Einstellungen (Stammdaten, KI-Stil) als eine Datei herunter – inklusive interner Adressen, also sicher aufbewahren. Empfehlung: einmal im Monat.</p>
+      <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn" data-act="export">Komplett-Sicherung herunterladen</button>
+        <label class="btn">Sicherung prüfen …<input type="file" accept="application/json,.json" data-act-change="backupcheck" hidden></label></div>
+      <p class="hint">„Sicherung prüfen“ liest eine heruntergeladene Datei und zeigt, ob sie vollständig und lesbar ist. Es wird dabei nichts verändert.</p>
+      <div id="backupres">${S.backupRes || ""}</div>
+    </section>
+    <section class="card"><h2>KI-Auswertung</h2>
+      ${kiStatistik()}
     </section>
   </div>`;
 }
@@ -1308,6 +1416,14 @@ function pickerResults(kind, q) {
     let last = "", h = "";
     for (const a of hits) { if (a.art !== last) { h += `<div class="grp">${esc(a.art)}</div>`; last = a.art; } h += `<button type="button" data-act="pick" data-kind="${kind}" data-v="${esc(a.code)}">${esc(a.klartext)}<small>${esc(a.code)}</small></button>`; }
     return h || `<div class="grp">Kein Treffer</div>`;
+  }
+  if (kind === "ort") {
+    let recent = []; try { recent = JSON.parse(localStorage.getItem("pn_orte") || "[]"); } catch {}
+    const alle = [...new Set([...(S.stamm.ortsteile || DEFAULT_STAMM.ortsteile || []), ...recent])].sort((a, b) => a.localeCompare(b, "de"));
+    const hits = alle.filter(o => !q || o.toLowerCase().includes(q));
+    const exakt = alle.some(o => o.toLowerCase() === q);
+    return hits.map(o => `<button type="button" data-act="pick" data-kind="ort" data-v="${esc(o)}">${esc(o)}</button>`).join("")
+      + (q && !exakt ? `<button type="button" data-act="pick" data-kind="ort" data-v="${esc(q.replace(/^./, c => c.toUpperCase()))}">„${esc(q)}“ übernehmen<small>neuer Ortsteil – wird auf diesem Gerät gemerkt</small></button>` : "");
   }
   if (kind === "stp") {
     if (q.length < 2) return `<div class="grp">Mindestens 2 Buchstaben eingeben</div>`;
@@ -1330,7 +1446,7 @@ function capitalizeWehr(q) { const t = q.trim().replace(/\b\w/g, c => c.toUpperC
 /* ---------- Ereignisse ---------- */
 document.addEventListener("input", e => {
   const t = e.target;
-  if (t.dataset.bind) { S.form[t.dataset.bind] = t.type === "checkbox" ? t.checked : t.value; saveDraft(); if (t.dataset.bind === "besonderheiten") { const rb = $("#rqbox"); if (rb) rb.innerHTML = rueckfragenHtml(S.form); } return; }
+  if (t.dataset.bind) { S.form[t.dataset.bind] = t.type === "checkbox" ? t.checked : t.value; saveDraft(); if (t.dataset.bind === "besonderheiten") { const rb = $("#rqbox"); if (rb) rb.innerHTML = rueckfragenHtml(S.form); } if (!t.dataset.search) return; }
   if (t.dataset.bindResult && S.result) { S.result.text = t.value; const c = $("#cc"); if (c) c.innerHTML = counter(t.value); saveDraft(); return; }
   if (t.dataset.search) {
     const box = t.parentElement.querySelector(".picklist");
@@ -1351,6 +1467,22 @@ document.addEventListener("change", async e => {
   if (t.dataset.bind && t.type === "checkbox") { S.form[t.dataset.bind] = t.checked; return; }
   if (t.dataset.filter && t.dataset.filter !== "q") { S.filter[t.dataset.filter] = t.value; viewArchiv($("#main")); return; }
   const act = t.dataset.actChange;
+  if (act === "backupcheck") {
+    const file = t.files?.[0]; if (!file) return;
+    file.text().then(txt => {
+      let d; try { d = JSON.parse(txt); } catch { S.backupRes = `<div class="notice err">Die Datei ist keine lesbare Sicherung (kein gültiges JSON).</div>`; render(); return; }
+      const b = Array.isArray(d.berichte) ? d.berichte : [], n = Array.isArray(d.nutzer) ? d.nutzer : [], c = d.config || {};
+      const ohneText = b.filter(x => !x.text).length, ohneDatum = b.filter(x => !x.datum).length;
+      const ok = d.app === "PressNex" && b.length > 0;
+      S.backupRes = `<div class="notice ${ok ? "ok" : "warn"}"><b>${ok ? "Sicherung lesbar" : "Sicherung unvollständig oder alt"}</b><br>
+        Erstellt: ${esc(d.exportiert ? new Date(d.exportiert).toLocaleString("de-DE") : "unbekannt")}<br>
+        Berichte: ${b.length}${d.anzahl?.berichte != null && d.anzahl.berichte !== b.length ? ` (erwartet ${d.anzahl.berichte})` : ""} · Nutzer: ${n.length} · Stammdaten: ${c.stammdaten ? "ja" : "nein"} · KI-Stil: ${c.ki ? "ja" : "nein"}
+        ${ohneText || ohneDatum ? `<br>Auffällig: ${ohneText} Berichte ohne Text, ${ohneDatum} ohne Datum.` : ""}
+        ${S.berichte ? `<br>Zum Vergleich in der App: ${S.berichte.length} Berichte.` : ""}</div>`;
+      render();
+    });
+    return;
+  }
   if (act === "vorlage") { S.form.vorlage = t.value; klassIdx = null; S.secOpen = undefined; saveDraft(); render(); return; }
   if (act === "addfz") {
     let v = t.value; if (!v) return;
@@ -1435,6 +1567,8 @@ const ACT = {
     if (kind === "aao2") { S.form.code2 = v; S.form.erhOpen = true; }
     if (kind === "aao" || kind === "aao2") { S.btab = ""; S.centeredTab = null; klassIdx = null; S.secOpen = undefined; }
     if (kind === "lead") setLead(v);
+    if (kind === "ort") { S.form.ort = v; const liste = S.stamm.ortsteile || DEFAULT_STAMM.ortsteile || [];
+      if (!liste.includes(v)) { try { const r = JSON.parse(localStorage.getItem("pn_orte") || "[]"); if (!r.includes(v)) localStorage.setItem("pn_orte", JSON.stringify([v, ...r].slice(0, 30))); } catch {} } saveDraft(); }
     if (kind === "add" && !S.form.beteiligte.some(b => b.name === v)) { S.form.beteiligte.push({ name: v, fz: [], lead: false }); S.form.keineWeiteren = false; }
     render();
   },
@@ -1465,6 +1599,12 @@ const ACT = {
   secnichts: t => { const f = S.form, v = t.dataset.v; f.nichts = { ...(f.nichts || {}), [v]: !(f.nichts || {})[v] }; saveDraft();
     const i = ABSCHNITTE.findIndex(a => a.id === v); if (f.nichts[v] && ABSCHNITTE[i + 1]) { S.secOpen = ABSCHNITTE[i + 1].id; }
     render(); const el = document.querySelector(`.sec[data-sec="${S.secOpen}"]`); if (el) { const r = el.getBoundingClientRect(); window.scrollBy({ top: r.top - 110, behavior: "smooth" }); } },
+  eigenadd: t => { const inp = $(`#eigen-${t.dataset.v}`), v = (inp?.value || "").trim().replace(/^-\s*/, ""); if (!v) return;
+    lageAdd(S.form, v); S.eigenSec = { ...(S.eigenSec || {}), [v.toLowerCase()]: t.dataset.v }; klassIdx = null; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  eigenmerken: async t => { const sec = t.dataset.v, inp = $(`#eigen-${sec}`), v = (inp?.value || "").trim(); if (!v) { toast("Erst einen Stichpunkt eingeben"); return; }
+    const st = structuredClone(S.stamm); st.eigeneStp = { ...(st.eigeneStp || {}) }; st.eigeneStp[sec] = [...new Set([...(st.eigeneStp[sec] || []), v])];
+    try { await setDoc(doc(db, "config", "stammdaten"), { ...st, bausteineVersion: BAUSTEINE_VERSION }); S.stamm = st; klassIdx = null; lageAdd(S.form, v); saveDraft(); toast("Stichpunkt dauerhaft gespeichert"); const y = window.scrollY; render(); window.scrollTo(0, y); }
+    catch (e) { toast("Speichern fehlgeschlagen: " + (e.code || e.message)); } },
   allestp: () => { S.alleStp = !S.alleStp; const y = window.scrollY; render(); window.scrollTo(0, y); },
   offenok: () => { S.offenOk = true; S.modal = null; generate(); },
   offenfix: t => { S.modal = null; S.step = 4; S.secOpen = t.dataset.v; render(); const el = document.querySelector(`.sec[data-sec="${t.dataset.v}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
@@ -1492,7 +1632,30 @@ const ACT = {
   },
   resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; S.secOpen = undefined; klassIdx = null; render(); } },
   generate: () => generate(),
+  kanal: t => { S.form.kanal = t.dataset.v; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
+  kanalwechsel: t => {
+    const k = t.dataset.v; if (S.busy) return;
+    if (S.result) S.texte = { ...(S.texte || {}), [S.result.kanal || "instagram"]: S.result.text };
+    S.form.kanal = k; saveDraft();
+    if (S.texte?.[k]) { S.result = { ...S.result, text: S.texte[k], kanal: k, dauer: "", modell: "" }; render(); return; }
+    S.offenOk = true; generate();
+  },
   copyresult: () => copy(S.result.text),
+  fcdel: t => {
+    const x = faktencheck(S.result.text, S.form)[+t.dataset.i]; if (!x) return;
+    const sig = (S.result.text.match(/\n\n\/[a-zäöü]+\s*$/i) || [""])[0], body = S.result.text.slice(0, S.result.text.length - sig.length);
+    const re = new RegExp(x.wort.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    // Satz = von Satzanfang bis Satzende, Abkürzungen wie „z. B.“ werden nicht berücksichtigt
+    const saetze = body.split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ])/);
+    const idx = saetze.findIndex(z => re.test(z));
+    if (idx < 0) { toast("Stelle nicht gefunden – bitte von Hand ändern"); return; }
+    const vorher = S.result.text;
+    saetze.splice(idx, 1);
+    S.result = { ...S.result, text: saetze.join(" ").replace(/ \n/g, "\n").replace(/\n{3,}/g, "\n\n").trim() + sig };
+    S.undoText = vorher; S.texte = { ...(S.texte || {}), [S.result.kanal || "instagram"]: S.result.text }; saveDraft();
+    render(); toast("Satz entfernt – „Rückgängig“ unter dem Text");
+  },
+  fcundo: () => { if (!S.undoText) return; S.result = { ...S.result, text: S.undoText }; S.undoText = ""; S.texte = { ...(S.texte || {}), [S.result.kanal || "instagram"]: S.result.text }; saveDraft(); render(); },
   save: () => saveReport(),
   openreport: t => openReport(t.dataset.id),
   closemodal: () => { S.modal = null; S.afterTpl = null; render(); },
@@ -1508,7 +1671,7 @@ const ACT = {
     S.form = { ...newForm(), datum: b.datum, uhrzeit: b.uhrzeit, code: b.code, klartext: b.klartext || "", ort: b.ort || "", adresse: b.adresseIntern || "",
       code2: b.code2 || "", erhWann: b.erhWann || "", erhGruende: b.erhGruende || [], erhFrei: b.erhFrei || "", erhOpen: !!b.code2,
       besonderheiten: b.besonderheiten || "", beteiligte: (b.beteiligte || []).map(x => ({ name: x.name, fz: [...(x.fz || [])], lead: !!x.lead })), ausschreiben: !!b.ausschreiben, fzNennen: !!b.fzNennen };
-    S.result = { text: b.text || "" }; S.editId = b.id; S.modal = null; S.view = "neu"; S.error = ""; render(); window.scrollTo(0, 0);
+    S.result = { text: b.text || "", kanal: b.kanal || "instagram" }; S.texte = b.texte || { [b.kanal || "instagram"]: b.text || "" }; S.form.kanal = b.kanal || "instagram"; S.editId = b.id; S.modal = null; S.view = "neu"; S.error = ""; render(); window.scrollTo(0, 0);
   },
   togglestep: t => { const n = +t.dataset.n; S.step = S.step === n ? 0 : n; render(); },
   nextstep: t => { S.step = +t.dataset.n; render(); const el = document.querySelectorAll(".step-card")[S.step - 1]; el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
@@ -1552,7 +1715,8 @@ const ACT = {
   savestamm: async () => {
     try {
       const st = {};
-      for (const k of ["eigene", "eigeneFahrzeuge", "gruppen", "fahrzeuge", "aao", "bausteine"]) st[k] = JSON.parse($("#sd-" + k).value);
+      for (const k of ["eigene", "eigeneFahrzeuge", "gruppen", "fahrzeuge", "aao", "bausteine", "eigeneStp"]) st[k] = JSON.parse($("#sd-" + k).value);
+      st.ortsteile = $("#sd-ortsteile").value.split("\n").map(x => x.trim()).filter(Boolean);
       st.bausteineVersion = BAUSTEINE_VERSION;
       await setDoc(doc(db, "config", "stammdaten"), st); S.stamm = st; toast("Stammdaten gespeichert");
     } catch (e) { toast(e instanceof SyntaxError ? "Formatfehler im JSON – bitte prüfen" : "Fehler: " + (e.code || e.message)); }
@@ -1562,9 +1726,14 @@ const ACT = {
     try {
       const snap = await getDocs(query(collection(db, "berichte"), orderBy("ts", "desc")));
       const data = snap.docs.map(x => { const d = x.data(); for (const k of ["erstellt", "geaendert"]) if (d[k]?.toDate) d[k] = d[k].toDate().toISOString(); return { id: x.id, ...d }; });
-      const blob = new Blob([JSON.stringify({ exportiert: new Date().toISOString(), berichte: data }, null, 1)], { type: "application/json" });
+      const plain = d => JSON.parse(JSON.stringify(d, (k, v) => v && typeof v === "object" && typeof v.toDate === "function" ? v.toDate().toISOString() : v));
+      const us = await getDocs(collection(db, "users"));
+      const nutzer = us.docs.map(x => ({ id: x.id, ...plain(x.data()) }));
+      const cfg = {}; for (const id of ["stammdaten", "ki"]) { const c = await getDoc(doc(db, "config", id)); if (c.exists()) cfg[id] = plain(c.data()); }
+      const blob = new Blob([JSON.stringify({ app: "PressNex", version: 2, exportiert: new Date().toISOString(), anzahl: { berichte: data.length, nutzer: nutzer.length }, berichte: data, nutzer, config: cfg }, null, 1)], { type: "application/json" });
       const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `pressnex-sicherung-${new Date().toISOString().slice(0, 10)}.json`; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast(`Sicherung erstellt: ${data.length} Berichte, ${nutzer.length} Nutzer`);
     } catch (e) { toast("Export fehlgeschlagen: " + (e.code || e.message)); }
   }
 };
@@ -1576,6 +1745,7 @@ document.addEventListener("click", e => {
 render();
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.id === "qfree") { e.preventDefault(); tplCommit(e.target.value); }
+  if (e.key === "Enter" && e.target.id?.startsWith("eigen-")) { e.preventDefault(); e.target.parentElement.querySelector("[data-act=eigenadd]")?.click(); }
 });
 
 // PC/iPad quer: angeklickten Schritt als „aktuell“ markieren, ohne neu zu zeichnen

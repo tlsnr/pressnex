@@ -347,3 +347,28 @@ button:focus-visible{outline:3px solid var(--red-line);outline-offset:2px}
 .sec-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding-top:12px;border-top:1px solid var(--line);flex-wrap:wrap}
 .sec-foot .btn.next{display:flex;min-width:0;min-height:42px;padding:0 16px;background:var(--ink);color:#fff;border-color:var(--ink);margin-left:auto}
 .offen-list{margin:4px 0 8px;padding-left:20px;line-height:1.7;font-weight:600}
+
+/* Kanal-Auswahl */
+.kanal-wrap{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.kanal{display:flex;gap:4px;padding:3px;background:#EEF2F7;border-radius:12px;overflow-x:auto;scrollbar-width:none}
+.kanal::-webkit-scrollbar{display:none}
+.kanal button{flex:1 0 auto;min-height:40px;border:0;background:transparent;border-radius:9px;font-size:14px;font-weight:600;color:var(--ink2);cursor:pointer;padding:0 12px;white-space:nowrap}
+.kanal button.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(15,23,42,.12)}
+/* Faktencheck */
+.fc{border:1.5px solid #F59E0B;background:#FFFBEB;border-radius:14px;padding:12px 14px;margin:6px 0}
+.fc-head{display:flex;align-items:center;gap:8px;color:#78350F}
+.fc ul{margin:6px 0 0;padding-left:18px;line-height:1.6}
+.fc mark{background:#FDE68A;border-radius:4px;padding:0 3px}
+.fc-ok{color:var(--ok);font-weight:600;font-size:14px;margin:4px 0}
+/* Eigene Stichpunkte */
+.eigen-add{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.eigen-add input{flex:1 1 180px;min-width:0;min-height:42px}
+.btn.small{min-height:42px;padding:0 14px;font-size:14px}
+.btn.ghostbtn{background:transparent}
+/* KI-Auswertung & Faktencheck-Korrektur */
+.tablewrap{overflow-x:auto}
+table.mini{width:100%;border-collapse:collapse;font-size:14px}
+table.mini th,table.mini td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.mini th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.fc-del{margin-left:4px;color:var(--red)}
+.notice.warn{background:var(--warn-soft);border:1px solid #FCD34D;color:#78350F}
