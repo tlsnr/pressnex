@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261111-1030";
+import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261111-1100";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -716,8 +716,8 @@ function gefuehrtPanel(f) {
       if (eigene.length) h += `<div class="sec-grp">Eigene Stichpunkte</div><div class="chips">${eigene.map(p => { const { t, q } = tplSplit(p); return chipHtml(t, q, zeilen); }).join("")}</div>`;
       h += `<div class="eigen-add"><input type="text" id="eigen-${a.id}" placeholder="Eigenen Stichpunkt eingeben" autocomplete="off"><button type="button" class="btn small" data-act="eigenadd" data-v="${a.id}">Hinzufügen</button>${S.profile?.rolle === "admin" ? `<button type="button" class="btn small ghostbtn" data-act="eigenmerken" data-v="${a.id}" title="Für alle dauerhaft in diesem Abschnitt anbieten">+ dauerhaft</button>` : ""}</div>`;
       const next = ABSCHNITTE[i + 1];
-      h += `<div class="sec-foot">${a.nichts ? `<button type="button" class="chip small keine-btn ${st.nichts ? "on" : ""}" data-act="secnichts" data-v="${a.id}">${st.nichts ? "✓ " : ""}${esc(a.nichts)}</button>` : "<span></span>"}
-        ${next ? `<button type="button" class="btn next small" data-act="secopen" data-v="${next.id}">Weiter: ${esc(next.titel.split(" ")[0])}</button>` : ""}</div></div>`;
+      h += `<div class="sec-foot">${a.nichts ? `<button type="button" class="chip small keine-btn ${st.nichts ? "on" : ""}" data-act="secnichts" data-v="${a.id}">${st.nichts ? "✓ " : "∅ "}${esc(a.nichts)}</button>` : "<span></span>"}
+        ${next ? `<button type="button" class="btn next small" data-act="secopen" data-v="${next.id}">Weiter: ${esc(next.titel.split(" ")[0])} ›</button>` : `<button type="button" class="btn next small" data-act="secfertig">Fertig ✓</button>`}</div></div>`;
     }
     h += `</div>`;
   });
@@ -774,10 +774,11 @@ function rueckfragen(f) {
     add("mess", "Was ergaben die Messungen?", [
       { label: "Negativ", act: "qline", line: "Messungen verliefen negativ" },
       { label: "Erhöhte Werte", act: "qline", line: "Messungen ergaben erhöhte Werte" }]);
-  if (has(/^feuer drohte auf ein nachbargebäude überzugreifen$/i) && !has(/riegelstellung|weitere ausbreitung verhindert/i))
+  if (has(/^feuer drohte auf (ein|den) .+ überzugreifen$/i) && !has(/riegelstellung|ausbreitung verhindert|übergreifen verhindert/i))
     add("riegel", "Konnte ein Übergreifen verhindert werden?", [
       { label: "Riegelstellung aufgebaut", act: "qline", line: "Riegelstellung zum Nachbargebäude aufgebaut" },
-      { label: "Ausbreitung verhindert", act: "qline", line: "Weitere Ausbreitung verhindert" }]);
+      { label: "Ausbreitung verhindert", act: "qline", line: "Weitere Ausbreitung verhindert" },
+      { label: "Feuer griff über", act: "qline", line: "Feuer griff auf das angrenzende Objekt über" }]);
   if (f.code2 && f.erhGruende.includes(ERKUNDUNG) && !erkundungZeilen(f).length) {
     add("erk", "Was haben die ersteintreffenden Kräfte festgestellt?", [{ label: "Feststellung auswählen", act: "qerk" }], "Grund der Stichworterhöhung war die Lageerkundung.");
     if (out.length) out[out.length - 1].noPop = true;
@@ -1102,7 +1103,9 @@ function buildPrompt(f) {
 - Den Bericht immer vollständig zu Ende schreiben.
 - Kein „rund“, „etwa“ oder „circa“ vor Zahlen oder Zeiten aus den Stichpunkten („Nach drei Stunden …“).
 - Gefahren und Besonderheiten (z. B. Gasflaschen, Photovoltaikanlage, Wind) NIE als Begründung für eine Maßnahme darstellen, außer es steht ausdrücklich so in den Stichpunkten. Richtig: „Erschwerend befanden sich Gasflaschen im Brandbereich.“ Falsch: „Da sich Gasflaschen im Brandbereich befanden, wurde die Brandbekämpfung eingeleitet.“
-- Kurze, klare Sätze: höchstens etwa 25 Wörter, ein Gedanke pro Satz. Nicht mehrere Maßnahmen in einen Satz packen (Trupps, Seiten und Strahlrohre lieber auf zwei Sätze verteilen).
+- Satzlänge abwechseln: kurze und mittellange Sätze mischen (meist 10 bis 25 Wörter). KEIN Stakkato aus lauter Mini-Sätzen. Was zusammengehört, mit Komma, „und“, „wobei“ oder „sodass“ verbinden, z. B. „Ein PKW stand bereits in voller Ausdehnung in Flammen, zudem drohte das Feuer auf ein angrenzendes Gebäude überzugreifen.“ oder „Ein Trupp ging unter Atemschutz mit einem C-Rohr vor, im weiteren Verlauf kam zusätzlich Schaum zum Einsatz.“ Aber keine Bandwurmsätze mit mehr als drei Aussagen.
+- Dieselbe Organisation nicht in zwei Sätzen hintereinander nennen: „Ebenfalls vor Ort war die Polizei, an die die Einsatzstelle anschließend übergeben wurde.“ statt zwei Sätzen.
+- „Löschmaßnahmen“, „Brandbekämpfung“ und „bekämpft“ nicht kurz hintereinander verwenden.
 - Kein Wort in zwei aufeinanderfolgenden Sätzen wiederholen (z. B. „bereits“, „Brandbekämpfung“, „Glutnester“) – Synonyme oder Umstellung verwenden.
 - Die Reihenfolge der Stichpunkte STRIKT einhalten. Maßnahmen wie eine Straßensperrung stehen bei den Maßnahmen, nicht hinter den Verletzten.
 - Brandursache und Ermittlungen der Polizei immer als eigener, kurzer Satz am Ende, z. B. „Die Polizei hat die Ermittlungen zur Brandursache aufgenommen.“ Nicht als Nebensatz an andere Kräfte hängen.
@@ -1223,7 +1226,7 @@ async function generate() {
       : "Die KI konnte keinen Bericht erstellen. Bitte erneut versuchen." + (msg ? ` (${msg.slice(0, 400)})` : "");
     render(); return;
   }
-  text = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
+  text = text.replace(/^```[a-z]*\n?|```$/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   const sig = kanalVon() === "presse" ? "" : `\n\n/${S.profile.kuerzel.toLowerCase()}`;
   S.result = { text: `${text}${sig}`, kanal: kanalVon(), modell: genutzt, dauer: dauer };
   S.texte = { ...(S.texte || {}), [kanalVon()]: S.result.text };
@@ -1605,6 +1608,7 @@ const ACT = {
     const st = structuredClone(S.stamm); st.eigeneStp = { ...(st.eigeneStp || {}) }; st.eigeneStp[sec] = [...new Set([...(st.eigeneStp[sec] || []), v])];
     try { await setDoc(doc(db, "config", "stammdaten"), { ...st, bausteineVersion: BAUSTEINE_VERSION }); S.stamm = st; klassIdx = null; lageAdd(S.form, v); saveDraft(); toast("Stichpunkt dauerhaft gespeichert"); const y = window.scrollY; render(); window.scrollTo(0, y); }
     catch (e) { toast("Speichern fehlgeschlagen: " + (e.code || e.message)); } },
+  secfertig: () => { S.secOpen = ""; render(); const g = document.querySelector(".genbar") || document.querySelector("[data-act=generate]"); g?.scrollIntoView({ behavior: "smooth", block: "center" }); },
   allestp: () => { S.alleStp = !S.alleStp; const y = window.scrollY; render(); window.scrollTo(0, y); },
   offenok: () => { S.offenOk = true; S.modal = null; generate(); },
   offenfix: t => { S.modal = null; S.step = 4; S.secOpen = t.dataset.v; render(); const el = document.querySelector(`.sec[data-sec="${t.dataset.v}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
