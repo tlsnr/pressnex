@@ -1640,7 +1640,7 @@ const ENDE = ["## Andere Organisationen", "Polizei sicherte die Einsatzstelle ab
   "## Dank & Hinweis", "Dank an die unterstützenden Kräfte", "Dank an Anwohner / Landwirte für die Unterstützung", "Hinweis: Rauchwarnmelder retten Leben",
   "Hinweis: Notruf 112 frühzeitig wählen", "Hinweis: Waldbrandgefahr beachten", "Hinweis: Fenster und Türen geschlossen halten"];
 const B = "Es brannte: ";
-const ANKUNFT_BRAND = ["## Beim Eintreffen", "Gemeldete Lage bestätigte sich", "Lage zunächst unklar", "Leichte Rauchentwicklung im Gebäude", "Leichte Rauchentwicklung außerhalb des Gebäudes",
+const ANKUNFT_BRAND = ["## Beim Eintreffen", "Gemeldete Lage bestätigte sich", "Lage kleiner als gemeldet", "Entstehungsbrand", "Lage zunächst unklar", "Leichte Rauchentwicklung im Gebäude", "Leichte Rauchentwicklung außerhalb des Gebäudes",
   "Starke Rauchentwicklung im Gebäude", "Starke Rauchentwicklung sichtbar", "Rauch drang aus dem Dachbereich", "Rauch drang aus einem Fenster", "Flammen schlugen aus dem Fenster",
   "Feuerschein sichtbar", "Brannte bereits in voller Ausdehnung",
   "## Personen vor Ort", "Es befanden sich noch [#] {Person|Personen} im Gebäude|Wie viele Personen befanden sich noch im Gebäude?",
@@ -1672,7 +1672,8 @@ export const VORLAGEN = [
     pers: PERS, ende: ENDE },
   { id: "fahrzeug", name: "Fahrzeugbrand", match: /^F\d[XY]?_(Fahrzeug|Luftfahrzeug|Schiff)/,
     lage: ["## Was brannte?", B + "ein PKW", B + "ein LKW", B + "ein Wohnmobil", B + "ein Roller", B + "ein E-Bike / Akku", B + "ein Traktor", B + "eine landwirtschaftliche Maschine", B + "ein Schiff",
-      "## Beim Eintreffen", "Gemeldete Lage bestätigte sich", "Brannte bereits in voller Ausdehnung", "Der Motorraum brannte", "Starke Rauchentwicklung sichtbar", "Fahrzeug bereits verlassen",
+      "## Beim Eintreffen", "Gemeldete Lage bestätigte sich", "Entstehungsbrand im Motorraum", "Brannte bereits in voller Ausdehnung", "Nur Rauch, kein offenes Feuer",
+      "Brand bereits durch den Fahrer gelöscht", "Lage kleiner als gemeldet", "Der Motorraum brannte", "Starke Rauchentwicklung sichtbar", "Fahrzeug bereits verlassen",
       "[#] {Person|Personen} im Fahrzeug eingeschlossen|Wie viele Personen waren im Fahrzeug eingeschlossen?", "Polizei bereits vor Ort", "Rettungsdienst bereits vor Ort"],
     gefahr: ["## Gefahren", "Betriebsstoffe liefen aus", "Feuer drohte auf ein Gebäude überzugreifen", "Gefahr durch fließenden Verkehr", "Elektro- oder Hybridfahrzeug", "Gasflaschen im Fahrzeug", ...BED],
     mass: ["## Menschenrettung", "Umgehend Menschenrettung eingeleitet", ...LOESCHEN.slice(0, 5), "Mit dem Schnellangriff abgelöscht", "Im weiteren Einsatzverlauf Schaum eingesetzt",

@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, orderBy, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js";
-import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261111-1145";
+import { DEFAULT_STAMM, ABSCHNITTE, VORLAGEN } from "./data.js?v=20261113-1030";
 
 /* ---------- Konfiguration (öffentlich, nicht geheim) ---------- */
 const firebaseConfig = {
@@ -235,7 +235,7 @@ onAuthStateChanged(auth, async user => {
   S.loading = false; render();
 });
 
-const BAUSTEINE_VERSION = "20261111-1000";
+const BAUSTEINE_VERSION = "20261113-1030";
 async function loadConfig() {
   const [st, ki] = await Promise.all([getDoc(doc(db, "config", "stammdaten")), getDoc(doc(db, "config", "ki"))]);
   if (st.exists()) {
@@ -267,7 +267,7 @@ function saveDraft() {
     } catch (e) { console.warn("Entwurf", e); }
   }, data ? 2500 : 0);
 }
-function clearDraft() { lastDraft = ""; S.form = newForm(); S.result = null; S.texte = {}; S.eigenSec = {}; S.editId = null; S.step = 1; saveDraft(); }
+function clearDraft() { lastDraft = ""; S.form = newForm(); S.result = null; S.texte = {}; S.eigenSec = {}; S.editId = null; S.step = 1; S.wpId = "einsatz"; S.wizMore = {}; saveDraft(); }
 async function loadDraft() {
   let best = null;
   try { const l = JSON.parse(localStorage.getItem(draftKey()) || "null"); if (l) best = l; } catch {}
@@ -501,15 +501,13 @@ function viewNeu(main) {
     ${st ? `<label class="f">Stichwort im Bericht <span class="hint inline">änderbar</span><input type="text" data-bind="klartext" value="${esc(f.klartext)}"></label>` : ""}
     ${st ? erhBlock(f) : ""}
     <label class="f">Ort / Ortsteil <span class="hint inline">erscheint im Bericht</span><div class="picker"><input type="text" data-bind="ort" data-search="ort" value="${esc(f.ort)}" placeholder="Ortsteil wählen oder eingeben" autocomplete="off"><div class="picklist hidden"></div></div></label>
-    <label class="f"><span>Einsatzadresse <span class="lock-note">🔒 nur intern</span></span><input type="text" data-bind="adresse" value="${esc(f.adresse)}" placeholder="Nie im Bericht, nie an die KI"></label>
-    <button type="button" class="btn next" data-act="nextstep" data-n="2">Weiter</button>`;
+    <label class="f"><span>Einsatzadresse <span class="lock-note">🔒 nur intern</span></span><input type="text" data-bind="adresse" value="${esc(f.adresse)}" placeholder="Nie im Bericht, nie an die KI"></label>`;
 
   const body2 = `<div class="chips">${quickLead}</div>
     <div class="picker" data-picker="lead">
       <input type="search" placeholder="Auswärtige Feuerwehr suchen (z. B. Lohne)" data-search="lead" autocomplete="off"><div class="picklist hidden"></div>
     </div>
-    ${leadIdx >= 0 ? `<span class="flabel">Fahrzeuge der ${esc(f.beteiligte[leadIdx].name)}</span>${wehrCard(f.beteiligte[leadIdx], leadIdx, true)}` : ""}
-    <button type="button" class="btn next" data-act="nextstep" data-n="3">Weiter</button>`;
+    ${leadIdx >= 0 ? `<span class="flabel">Fahrzeuge der ${esc(f.beteiligte[leadIdx].name)}</span>${wehrCard(f.beteiligte[leadIdx], leadIdx, true)}` : ""}`;
 
   const body3 = `<p class="hint">Weitere Ortsfeuerwehren, Rettungsdienst oder Polizei hinzufügen – jeweils mit ihren Fahrzeugen.</p>
     ${f.beteiligte.map((b, i) => b.lead ? "" : wehrCard(b, i)).join("")}
@@ -518,50 +516,162 @@ function viewNeu(main) {
     <div class="picker" data-picker="add">
       <input type="search" placeholder="Weitere Feuerwehr, Rettungsdienst, Polizei …" data-search="add" autocomplete="off"><div class="picklist hidden"></div>
     </div>
-    ${d.anfo.length ? `<div class="notice info"><b>Anforderungen:</b> ${d.anfo.map(a => esc(a)).join(", ")}</div>` : ""}
-    <button type="button" class="btn next" data-act="nextstep" data-n="4">Weiter</button>`;
+    ${d.anfo.length ? `<div class="notice info"><b>Anforderungen:</b> ${d.anfo.map(a => esc(a)).join(", ")}</div>` : ""}`;
 
-  const body4 = `${gefuehrtPanel(f)}
-    <div id="rqbox">${rueckfragenHtml(f)}</div>
-    <div class="kanal-wrap"><span class="flabel">Bericht für</span>${kanalChips("kanal")}</div>
-    <textarea id="lage" data-bind="besonderheiten" rows="6" placeholder="Stichpunkte antippen oder selbst schreiben – die KI erfindet nichts dazu.">${esc(f.besonderheiten)}</textarea>
-    <label class="check"><input type="checkbox" data-bind="fzNennen" ${f.fzNennen ? "checked" : ""}> Fahrzeuge im Bericht erwähnen <span class="hint inline">(sonst nur die Feuerwehren)</span></label>`;
-
-  main.innerHTML = `<div class="stack neu">
+  S.wiz = true;
+  const pages = wizPages(f);
+  if (!S.wpId && f._wp) S.wpId = f._wp;
+  let wi = pages.findIndex(x => x.id === S.wpId); if (wi < 0) { wi = 0; S.wpId = pages[0].id; }
+  const pg = pages[wi], v = vorlageFuer(f);
+  f._wp = pg.id;
+  const fehlt = pg.id === "einsatz" ? stepFehlt(1, f) : pg.id === "wehr" ? stepFehlt(2, f) : pg.id === "kraefte" ? stepFehlt(3, f) : [];
+  const teil = pg.id === "einsatz" ? "Einsatz" : pg.id === "wehr" ? "Hauptfeuerwehr" : pg.id === "kraefte" ? "Weitere Kräfte" : pg.id === "fertig" ? "Übersicht" : "Lage · " + v.name;
+  const code = (aaoByCode(f.code2) || st)?.code || "";
+  let titel, sub = "", body = "";
+  if (pg.id === "einsatz") { titel = "Was wurde alarmiert?"; sub = "Datum, Uhrzeit, Stichwort und Ort"; body = body1; }
+  else if (pg.id === "wehr") { titel = "Welche Feuerwehr führte?"; sub = "Fahrzeuge kannst du direkt mit antippen"; body = body2; }
+  else if (pg.id === "kraefte") { titel = "Wer war noch dabei?"; sub = "Andere Wehren, Rettungsdienst, Polizei"; body = body3; }
+  else if (pg.id === "fertig") { titel = "Passt alles?"; sub = "Kurz prüfen, Kanal wählen, Bericht erstellen"; body = wizSummary(f, pages); }
+  else { const r = wizPageBody(f, pg); titel = r.titel; sub = r.sub; body = r.body; }
+  const sec = pg.sec ? ABSCHNITTE.find(x => x.id === pg.sec) : null;
+  const hatAuswahl = pg.groups ? lageZeilen(f).some(l => pg.groups.some(g => g.items.some(it => tplRegex(tplSplit(it).t).test(l)))) : false;
+  const nichtsKnopf = sec && pg.first && sec.nichts && !hatAuswahl;
+  const next = pages[wi + 1];
+  const pct = Math.round((wi + 1) / pages.length * 100);
+  main.innerHTML = `<div class="wiz">
     ${S.editId ? `<div class="notice info row" style="justify-content:space-between;align-items:center"><span><b>Bericht bearbeiten</b></span><button class="btn" data-act="canceledit">Abbrechen</button></div>` : ""}
-    ${stepper(f, done)}
-    <div class="cols">
-      <div class="stack">
-        ${stepCard(1, "Einsatz", true, s1, body1, done[1])}
-        ${stepCard(2, "Hauptfeuerwehr", true, s2, body2, done[2])}
-        ${stepCard(3, "Weitere beteiligte Kräfte", false, s3, body3, done[3])}
+    <header class="wiz-hero">
+      <div class="wiz-top">
+        <button type="button" class="wiz-back" data-act="wizgo" data-v="${wi > 0 ? pages[wi - 1].id : ""}" ${wi === 0 ? "disabled" : ""} aria-label="Zurück">‹</button>
+        <div class="wiz-teil"><span>${esc(teil)}</span>${code ? `<b>${esc(code)}</b>` : ""}</div>
+        <span class="wiz-count">${wi + 1}/${pages.length}</span>
       </div>
-      <div class="stack">
-        ${stepCard(4, "Lagebeschreibung", true, s4, body4, done[4])}
-        <div class="genbar">
-          ${S.error ? `<div class="notice err">${esc(S.error)}</div>` : ""}
-          <button class="btn primary big block" data-act="generate" ${S.busy ? "disabled" : ""}>${S.busy ? `<span class="spinner"></span> KI schreibt …` : `${ICON.spark} Bericht mit KI erstellen`}</button>
-          ${S.busy ? `<div class="kitimer" role="timer" aria-live="off"><span class="dot"></span><b id="kitimer">${fmtTimer()}</b><span class="hint" id="kihint">${esc(S.busyInfo || wartetext())}</span></div>` : ""}
-        </div>
-        ${S.result ? resultCard() : ""}
-        <button class="linkbtn center" data-act="resetform">Formular leeren</button>
-      </div>
-    </div>
+      <div class="wiz-prog" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
+      <h1 class="wiz-q">${esc(titel)}</h1>${sub ? `<p class="wiz-sub">${esc(sub)}</p>` : ""}
+    </header>
+    <section class="wiz-sheet">${body}
+      ${pg.groups ? `<div id="rqbox">${rueckfragenHtml(f)}</div>` : ""}
+    </section>
+    ${pg.id !== "fertig" ? `<div class="wiz-foot">
+      ${fehlt.length ? `<p class="wiz-miss">Noch offen: ${esc(fehlt.join(", "))}</p>` : ""}
+      <div class="wiz-btns">
+        ${nichtsKnopf ? `<button type="button" class="wiz-skip" data-act="wiznichts" data-v="${sec.id}" data-next="${next?.id || ""}">${esc(sec.nichts)}</button>`
+          : pg.groups && !hatAuswahl ? `<button type="button" class="wiz-skip" data-act="wizgo" data-v="${next?.id || ""}">Überspringen</button>` : ""}
+        <button type="button" class="wiz-next" data-act="wizgo" data-v="${next?.id || ""}" ${fehlt.length ? "disabled" : ""}>${next?.id === "fertig" ? "Zur Übersicht" : "Weiter"} <span aria-hidden="true">→</span></button>
+      </div></div>` : ""}
   </div>`;
-  const bt = main.querySelector(".btabs"), bc = main.querySelector(".bchips");
-  if (bt) {
-    bt.scrollLeft = S.btabScroll || 0;
-    const sichtbar = bt.offsetParent !== null && bt.clientWidth > 0;
-    if (sichtbar && (S.btabCenter || S.curTab !== S.centeredTab)) {
-      S.btabCenter = false; S.centeredTab = S.curTab;
-      const bon = bt.querySelector(".btab.on");
-      if (bon) { const r = bon.getBoundingClientRect(), rb = bt.getBoundingClientRect(); bt.scrollLeft += (r.left - rb.left) - (rb.width - r.width) / 2; }
-    }
-    bt.addEventListener("scroll", () => { S.btabScroll = bt.scrollLeft; }, { passive: true });
-    S.btabScroll = bt.scrollLeft;
-  }
-  if (bc) { bc.scrollTop = S.bchipScroll || 0; bc.addEventListener("scroll", () => { S.bchipScroll = bc.scrollTop; }, { passive: true }); }
   if (S.result && S.scrollResult) { S.scrollResult = false; $("#result")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+}
+
+/* ---------- Fragen-Ablauf: Seiten, Fragen, Übersicht ---------- */
+const FRAGE = {
+  "Was brannte?": "Was brannte?", "Beim Eintreffen": "Was habt ihr vor Ort vorgefunden?", "Lage": "Was habt ihr vor Ort vorgefunden?",
+  "Vor Ort": "Was war vor Ort noch wichtig?", "Personen vor Ort": "Waren noch Personen betroffen?", "Alarm": "Was hat ausgelöst?",
+  "Ergebnis der Erkundung": "Was ergab die Erkundung?", "Warum wurden wir alarmiert?": "Warum wurden wir alarmiert?",
+  "Gefahren": "Gab es Gefahren oder Besonderheiten?", "Besonderheiten": "Gab es Besonderheiten?", "Bedingungen": "Was erschwerte den Einsatz?",
+  "Menschenrettung": "Mussten Personen gerettet werden?", "Brandbekämpfung": "Wie wurde gelöscht?", "Löschen": "Wie wurde gelöscht?",
+  "Wasserversorgung": "Wie lief die Wasserversorgung?", "Schutz & Lüften": "Was wurde zum Schutz getan?", "Nachlöschen & Kontrolle": "Wie wurde nachkontrolliert?",
+  "Nach dem Löschen": "Was wurde danach gemacht?", "Erkundung": "Wie wurde erkundet?", "Abschluss der Maßnahmen": "Wie endeten die Maßnahmen?",
+  "Zugang": "Wie habt ihr euch Zugang verschafft?", "Danach": "Was geschah danach?", "Befreiung": "Wie wurde befreit?", "Unterstützung": "Wie habt ihr unterstützt?",
+  "Rettung": "Wie wurde gerettet?", "Sichern": "Wie wurde die Einsatzstelle gesichert?", "Suche": "Wie wurde gesucht?", "Wasser": "Was wurde gegen das Wasser getan?",
+  "Baum & Sturm": "Was wurde an Baum oder Gebäude getan?", "Erkundung & Messen": "Was ergaben Erkundung und Messungen?", "Maßnahmen": "Was wurde getan?",
+  "Verletzte": "Gab es Verletzte?", "Andere Organisationen": "Wer war noch im Einsatz – und wie endete er?"
+};
+const SEC_FRAGE = { lage: "Was habt ihr vor Ort vorgefunden?", gefahr: "Gab es Gefahren oder Besonderheiten?", mass: "Was wurde getan?", pers: "Gab es Verletzte oder Betroffene?", ende: "Wer war noch im Einsatz – und wie endete er?" };
+const TILE_ICON = [[/PKW|Auto/i, "🚗"], [/LKW/i, "🚚"], [/Wohnmobil/i, "🚐"], [/Roller/i, "🛵"], [/E-Bike|Akku/i, "🔋"], [/Traktor/i, "🚜"], [/landwirt/i, "🌾"], [/Schiff/i, "🚢"],
+  [/Zimmer/i, "🛏️"], [/Küche/i, "🍳"], [/Keller/i, "🧱"], [/Dachstuhl/i, "🏚️"], [/Mehrfamilienhaus/i, "🏢"], [/Wohnhaus/i, "🏠"], [/Wohnung/i, "🚪"], [/Balkon/i, "🪴"],
+  [/Garage|Carport/i, "🅿️"], [/Schuppen/i, "🛖"], [/Scheune|Stall/i, "🐄"], [/Gewerbe|Lagerhalle/i, "🏭"], [/Kamin|Schornstein/i, "🔥"], [/Photovoltaik/i, "☀️"],
+  [/Elektro/i, "⚡"], [/Waldstück/i, "🌲"], [/Moor/i, "🌿"], [/Böschung/i, "⛰️"], [/Hecke|Baum/i, "🌳"], [/Stroh|Feld|Fläche/i, "🌾"], [/Mülltonne|Unrat/i, "🗑️"],
+  [/Container/i, "📦"], [/Wahlplakat/i, "🪧"], [/Zaun/i, "🚧"], [/Grill/i, "🍖"]];
+const tileIcon = t => (TILE_ICON.find(([re]) => re.test(t)) || [0, "🔥"])[1];
+function wizPages(f) {
+  const v = vorlageFuer(f), pages = [{ id: "einsatz" }, { id: "wehr" }, { id: "kraefte" }];
+  const CAP = { lage: 3, gefahr: 1, mass: 3, pers: 1, ende: 1 };
+  for (const a of ABSCHNITTE) {
+    const eig = ((S.stamm.eigeneStp || {})[a.id] || []);
+    const list = [...(v[a.id] || []), ...(eig.length ? ["## Eigene Stichpunkte", ...eig] : [])];
+    const groups = []; let g = null;
+    for (const p of list) { if (p.startsWith("## ")) { g = { name: p.slice(3), items: [] }; groups.push(g); } else { if (!g) { g = { name: "", items: [] }; groups.push(g); } g.items.push(p); } }
+    const sp = [];
+    for (const gr of groups) { if (!gr.items.length) continue; const last = sp.at(-1), n = last ? last.reduce((x, y) => x + y.items.length, 0) : 0;
+      if (!last || (n >= 5 && sp.length < CAP[a.id] && gr.name !== "Eigene Stichpunkte")) sp.push([gr]); else last.push(gr); }
+    sp.forEach((gs, i) => pages.push({ id: `${a.id}-${i}`, sec: a.id, first: i === 0, groups: gs }));
+  }
+  pages.push({ id: "fertig" });
+  return pages;
+}
+function wizOption(full, q, zeilen, tile) {
+  const re = tplRegex(full), hit = zeilen.find(l => re.test(l)), vars = tplHasVars(full);
+  let label = (hit && vars ? hit : tplLabel(full)).replace(/^Es brannte:\s*/, "");
+  label = label.replace(/^(ein|eine|einen)\s+/i, m => tile ? "" : m);
+  if (tile) return `<button type="button" class="wz-tile ${hit ? "on" : ""}" data-act="baustein" data-v="${esc(full)}" data-q="${esc(q)}" aria-pressed="${!!hit}"><span class="wz-ic">${tileIcon(label)}</span><span>${esc(label.replace(/^./, c => c.toUpperCase()))}</span>${hit ? `<i class="wz-ok">✓</i>` : ""}</button>`;
+  return `<button type="button" class="wz-opt ${hit ? "on" : ""}${vars && !hit ? " ask" : ""}" data-act="baustein" data-v="${esc(full)}" data-q="${esc(q)}" aria-pressed="${!!hit}"><span class="wz-box">${hit ? "✓" : ""}</span><span class="wz-l">${esc(label)}</span>${vars && !hit ? `<span class="wz-num">Anzahl</span>` : ""}</button>`;
+}
+function wizPageBody(f, pg) {
+  const zeilen = lageZeilen(f), sec = ABSCHNITTE.find(x => x.id === pg.sec), mehr = (S.wizMore || {})[pg.id];
+  const first = pg.groups[0];
+  // Mehrere Gruppen auf einer Seite und die erste ist klein → allgemeine Frage des Abschnitts
+  const titel = (pg.groups.length > 1 && first.items.length < 4 ? SEC_FRAGE[pg.sec] : FRAGE[first.name]) || SEC_FRAGE[pg.sec];
+  const tiles = first.name === "Was brannte?";
+  const LIMIT = tiles ? 6 : 6;
+  let shown = 0, hidden = 0, body = "";
+  for (const gr of pg.groups) {
+    const vis = [];
+    for (const p of gr.items) {
+      const { t, q } = tplSplit(p), on = zeilen.some(l => tplRegex(t).test(l));
+      if (mehr || shown < LIMIT || on) { vis.push([t, q]); shown++; } else hidden++;
+    }
+    if (!vis.length) continue;
+    const isTile = tiles && gr === first;
+    if (gr !== first || pg.groups.length > 1) body += `<div class="wz-grp">${esc(gr === first && FRAGE[gr.name] === titel ? gr.name : gr.name)}</div>`;
+    body += `<div class="${isTile ? "wz-tiles" : "wz-opts"}">${vis.map(([t, q]) => wizOption(t, q, zeilen, isTile)).join("")}</div>`;
+  }
+  // ausgewählte Punkte dieses Abschnitts, die nicht auf den Seiten stehen (Suche, eigene)
+  if (pg.first) {
+    const alle = wizPages(f).filter(x => x.sec === pg.sec).flatMap(x => x.groups.flatMap(g => g.items.map(p => tplRegex(tplSplit(p).t))));
+    const fremd = zeilen.filter(l => klassifiziere(l)?.sec === pg.sec && !alle.some(re => re.test(l)));
+    if (fremd.length) body = `<div class="wz-grp">Ebenfalls ausgewählt</div><div class="wz-opts">${fremd.map(l => wizOption(l, "", zeilen, false)).join("")}</div>` + body;
+  }
+  if (hidden) body += `<button type="button" class="wz-more" data-act="wizmore" data-v="${pg.id}">+ ${hidden} weitere anzeigen</button>`;
+  else if (mehr) body += `<button type="button" class="wz-more" data-act="wizmore" data-v="${pg.id}">Weniger anzeigen</button>`;
+  // Inline-Rückfrage für Anzahl / Uhrzeit
+  if (S.inlineQ && S.pendingTpl) {
+    const t = S.pendingTpl, num = t.includes("[#]"), zeit = /\[uhrzeit\]/i.test(t);
+    body += `<div class="wz-ask" id="wzask"><b>${esc(S.inlineQ.q || (num ? "Wie viele?" : "Bitte ergänzen"))}</b>
+      ${num ? `<div class="wz-nums">${[1, 2, 3, 4, 5, 6].map(n => `<button type="button" data-act="qnum" data-n="${n}">${n}</button>`).join("")}</div>` : ""}
+      <div class="wz-askrow"><input id="qfree" type="${zeit ? "time" : num ? "number" : "text"}" ${num ? 'inputmode="numeric" min="1" placeholder="andere Zahl"' : 'placeholder="eingeben"'}><button type="button" class="btn primary" data-act="qok">OK</button><button type="button" class="linkbtn" data-act="wzaskx">Abbrechen</button></div></div>`;
+  }
+  body += `<div class="wz-eigen"><input type="text" id="eigen-${sec.id}" placeholder="+ Eigenen Punkt eingeben" autocomplete="off"><button type="button" class="btn small" data-act="eigenadd" data-v="${sec.id}">Hinzufügen</button></div>`;
+  const sub = pg.first ? sec.titel + (tiles ? " · tippe an, was passt" : " · mehrere Antworten möglich") : "Mehrere Antworten möglich";
+  return { titel, sub, body };
+}
+function wizSummary(f, pages) {
+  const st = aaoByCode(f.code), d = ableiten(f), z = lageZeilen(f);
+  const go = id => `<button type="button" class="wz-edit" data-act="wizgo" data-v="${id}">ändern</button>`;
+  const li = t => `<li>${esc(t)}</li>`;
+  let h = `<div class="wz-sum">
+    <div class="wz-sumsec"><h3>Einsatz ${go("einsatz")}</h3><ul>${li(`${st ? st.code : "–"}${f.code2 ? " → " + f.code2 : ""} · ${f.ort || "ohne Ort"} · ${deDate(f.datum)} ${f.uhrzeit}`)}</ul></div>
+    <div class="wz-sumsec"><h3>Kräfte ${go("wehr")}</h3><ul>${li(d.lead ? d.lead.name : "Hauptfeuerwehr fehlt")}${f.beteiligte.filter(b => !b.lead).map(b => li(b.name)).join("") || (f.keineWeiteren ? li("Keine weiteren Kräfte") : "")}</ul></div>`;
+  for (const a of ABSCHNITTE) {
+    const s = secStatus(f, a), first = pages.find(x => x.sec === a.id);
+    if (!first) continue;
+    h += `<div class="wz-sumsec ${s.done ? "" : "open"}"><h3>${esc(a.titel)} ${go(first.id)}</h3>${s.n ? `<ul>${s.zeilen.map(li).join("")}</ul>` : `<p class="${s.nichts ? "wz-none" : "wz-todo"}">${s.nichts ? esc(a.nichts) : "Noch nichts angegeben"}</p>`}</div>`;
+  }
+  const fremd = z.filter(l => !klassifiziere(l));
+  if (fremd.length) h += `<div class="wz-sumsec"><h3>Eigene Angaben</h3><ul>${fremd.map(li).join("")}</ul></div>`;
+  h += `</div>
+    <details class="wz-raw"><summary>Stichpunkte als Text bearbeiten</summary>
+      <textarea id="lage" data-bind="besonderheiten" rows="7">${esc(f.besonderheiten)}</textarea></details>
+    <div class="wz-kanal"><span class="wz-grp">Bericht für</span>${kanalChips("kanal")}</div>
+    <label class="check"><input type="checkbox" data-bind="fzNennen" ${f.fzNennen ? "checked" : ""}> Fahrzeuge im Bericht erwähnen <span class="hint inline">(sonst nur die Feuerwehren)</span></label>
+    <div class="genbar">
+      ${S.error ? `<div class="notice err">${esc(S.error)}</div>` : ""}
+      <button class="btn primary big block wz-gen" data-act="generate" ${S.busy ? "disabled" : ""}>${S.busy ? `<span class="spinner"></span> KI schreibt …` : `${ICON.spark} Bericht erstellen`}</button>
+      ${S.busy ? `<div class="kitimer" role="timer" aria-live="off"><span class="dot"></span><b id="kitimer">${fmtTimer()}</b><span class="hint" id="kihint">${esc(S.busyInfo || wartetext())}</span></div>` : ""}
+    </div>
+    ${S.result ? resultCard() : ""}
+    <button class="linkbtn center" data-act="resetform">Neuen Bericht beginnen</button>`;
+  return h;
 }
 
 function autoTab(f) {
@@ -641,7 +751,7 @@ function tplCommit(val) {
   const line = tplFill(t, t.includes("[#]") ? Number(v) : v, v);
   if (S.pendingReplace) { lageReplace(f, S.pendingReplace, line); S.pendingReplace = null; }
   else lageAdd(f, line);
-  S.pendingTpl = null; S.modal = null; saveDraft();
+  S.pendingTpl = null; S.modal = null; S.inlineQ = null; saveDraft();
   if (S.afterTpl === "erk") { S.afterTpl = null; erkModal(); } else askNew();
   const y = window.scrollY; render(); window.scrollTo(0, y);
   const ta = $("#lage"); if (ta) ta.scrollTop = ta.scrollHeight;
@@ -797,7 +907,7 @@ function rueckfragen(f) {
 }
 // Neue Rückfrage direkt beim Antippen als Fenster zeigen (jede nur einmal); offene bleiben als Karte stehen
 function askNew() {
-  if (S.modal) return;
+  if (S.modal || (S.wiz && S.view === "neu")) return;
   S.qShown = S.qShown || new Set();
   const qs = rueckfragen(S.form);
   const q = qs.find(x => !x.noPop && !S.qShown.has(x.id));
@@ -1101,6 +1211,7 @@ function buildPrompt(f) {
 - Flüssig erzählen. Eine kurze Erklärung (höchstens ein Satz) ist nur erlaubt, wenn sie direkt zu einer angegebenen Maßnahme gehört (z. B. warum eine Wärmebildkamera eingesetzt wurde). KEINE allgemeinen Füllsätze über die Aufgaben der Feuerwehr, Bedeutung von Einsätzen, besonnenes Vorgehen o. Ä. KEINE neuen Fakten erfinden (keine Zahlen, Ursachen, Verletzungen, Fahrzeuge, Zeiten oder Tätigkeiten).
 - Gründe und Absichten nicht ausschmücken (z. B. nicht „um weitere Kräfte für eine drohende Brandausbreitung bereitzustellen“), nur die angegebenen Gründe nennen.
 - Den Bericht immer vollständig zu Ende schreiben.
+- War die Lage kleiner als gemeldet (z. B. „Entstehungsbrand im Motorraum“, „Lage kleiner als gemeldet“, „Nur Rauch, kein offenes Feuer“), das klar und ohne Dramatik schildern, z. B. „Vor Ort stellte sich heraus, dass es sich lediglich um einen Entstehungsbrand im Motorraum handelte.“
 - Kein „rund“, „etwa“ oder „circa“ vor Zahlen oder Zeiten aus den Stichpunkten („Nach drei Stunden …“).
 - Gefahren und Besonderheiten (z. B. Gasflaschen, Photovoltaikanlage, Wind) NIE als Begründung für eine Maßnahme darstellen, außer es steht ausdrücklich so in den Stichpunkten. Richtig: „Erschwerend befanden sich Gasflaschen im Brandbereich.“ Falsch: „Da sich Gasflaschen im Brandbereich befanden, wurde die Brandbekämpfung eingeleitet.“
 - Satzlänge abwechseln: kurze und mittellange Sätze mischen (meist 10 bis 25 Wörter). KEIN Stakkato aus lauter Mini-Sätzen. Was zusammengehört, mit Komma, „und“, „wobei“ oder „sodass“ verbinden, z. B. „Ein PKW stand bereits in voller Ausdehnung in Flammen, zudem drohte das Feuer auf ein angrenzendes Gebäude überzugreifen.“ oder „Ein Trupp ging unter Atemschutz mit einem C-Rohr vor, im weiteren Verlauf kam zusätzlich Schaum zum Einsatz.“ Aber keine Bandwurmsätze mit mehr als drei Aussagen.
@@ -1146,7 +1257,7 @@ async function generate() {
   if (errs.length) {
     S.error = errs.join(" "); S.tried = true;
     const n = [1, 2, 3, 4].find(k => stepFehlt(k, S.form).length);
-    if (n) { S.step = n; render(); document.querySelector(`.step-card[data-step="${n}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    if (n) { S.wpId = ["einsatz", "wehr", "kraefte", "lage-0"][n - 1]; render(); window.scrollTo(0, 0); }
     else render();
     return;
   }
@@ -1248,7 +1359,7 @@ async function saveReport() {
       ort: f.ort.trim(), adresseIntern: f.adresse.trim(), besonderheiten: f.besonderheiten.trim(),
       code2: f.code2 || "", erhWann: f.erhWann || "", erhGruende: f.erhGruende || [], erhFrei: f.erhFrei || "",
       hauptfeuerwehr: d.lead.name, eigenerEinsatz: d.eigen, anforderungen: d.anfo,
-      beteiligte: f.beteiligte.map(b => ({ name: b.name, fz: b.fz, lead: !!b.lead })),
+      beteiligte: f.beteiligte.map(b => ({ name: b.name, fz: b.fz, lead: !!b.lead, ...(b.alarm ? { alarm: b.alarm } : {}), ...(b.anz ? { anz: b.anz } : {}) })),
       ausschreiben: f.ausschreiben, fzNennen: !!f.fzNennen, text: S.result.text,
       kanal: S.result.kanal || "instagram", texte: { ...(S.texte || {}), [S.result.kanal || "instagram"]: S.result.text },
       kiModell: S.result.modell || "", kiDauer: S.result.dauer || "", ortsteil: f.ort.trim(),
@@ -1611,7 +1722,7 @@ const ACT = {
   secfertig: () => { S.secOpen = ""; render(); const g = document.querySelector(".genbar") || document.querySelector("[data-act=generate]"); g?.scrollIntoView({ behavior: "smooth", block: "center" }); },
   allestp: () => { S.alleStp = !S.alleStp; const y = window.scrollY; render(); window.scrollTo(0, y); },
   offenok: () => { S.offenOk = true; S.modal = null; generate(); },
-  offenfix: t => { S.modal = null; S.step = 4; S.secOpen = t.dataset.v; render(); const el = document.querySelector(`.sec[data-sec="${t.dataset.v}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
+  offenfix: t => { S.modal = null; S.wpId = t.dataset.v + "-0"; render(); window.scrollTo(0, 0); },
   setalarm: t => { const b = S.form.beteiligte[+t.dataset.i]; b.alarm = t.dataset.v; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   dupnach: t => { const b = S.form.beteiligte[+t.dataset.i]; S.form.beteiligte.splice(+t.dataset.i + 1, 0, { name: b.name, fz: [], lead: false, alarm: "nach" }); saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   togglefz: t => {
@@ -1634,7 +1745,7 @@ const ACT = {
     if (!b.fz.includes(v)) b.fz.push(v); b.anz = { ...(b.anz || {}), [v]: n };
     S.pendingFz = null; S.modal = null; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y);
   },
-  resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; S.secOpen = undefined; klassIdx = null; render(); } },
+  resetform: () => { if (confirm("Formular wirklich leeren?")) { clearDraft(); S.error = ""; S.btab = ""; S.tried = false; S.maxStep = 1; S.step = 1; S.bopen = {}; S.secOpen = undefined; S.wpId = "einsatz"; S.wizMore = {}; klassIdx = null; render(); window.scrollTo(0, 0); } },
   generate: () => generate(),
   kanal: t => { S.form.kanal = t.dataset.v; saveDraft(); const y = window.scrollY; render(); window.scrollTo(0, y); },
   kanalwechsel: t => {
@@ -1674,16 +1785,24 @@ const ACT = {
     const b = S.berichte.find(x => x.id === t.dataset.id); if (!b) return;
     S.form = { ...newForm(), datum: b.datum, uhrzeit: b.uhrzeit, code: b.code, klartext: b.klartext || "", ort: b.ort || "", adresse: b.adresseIntern || "",
       code2: b.code2 || "", erhWann: b.erhWann || "", erhGruende: b.erhGruende || [], erhFrei: b.erhFrei || "", erhOpen: !!b.code2,
-      besonderheiten: b.besonderheiten || "", beteiligte: (b.beteiligte || []).map(x => ({ name: x.name, fz: [...(x.fz || [])], lead: !!x.lead })), ausschreiben: !!b.ausschreiben, fzNennen: !!b.fzNennen };
-    S.result = { text: b.text || "", kanal: b.kanal || "instagram" }; S.texte = b.texte || { [b.kanal || "instagram"]: b.text || "" }; S.form.kanal = b.kanal || "instagram"; S.editId = b.id; S.modal = null; S.view = "neu"; S.error = ""; render(); window.scrollTo(0, 0);
+      besonderheiten: b.besonderheiten || "", beteiligte: (b.beteiligte || []).map(x => ({ name: x.name, fz: [...(x.fz || [])], lead: !!x.lead, ...(x.alarm ? { alarm: x.alarm } : {}), ...(x.anz ? { anz: { ...x.anz } } : {}) })), ausschreiben: !!b.ausschreiben, fzNennen: !!b.fzNennen };
+    S.result = { text: b.text || "", kanal: b.kanal || "instagram" }; S.texte = b.texte || { [b.kanal || "instagram"]: b.text || "" }; S.form.kanal = b.kanal || "instagram"; S.editId = b.id; S.modal = null; S.view = "neu"; S.wpId = "fertig"; S.error = ""; render(); window.scrollTo(0, 0);
   },
+  wizgo: t => { const v = t.dataset.v; if (!v) return; S.wpId = v; S.inlineQ = null; S.pendingTpl = null; saveDraft(); render(); window.scrollTo(0, 0); },
+  wiznichts: t => { const f = S.form, v = t.dataset.v; f.nichts = { ...(f.nichts || {}), [v]: true }; saveDraft(); if (t.dataset.next) S.wpId = t.dataset.next; render(); window.scrollTo(0, 0); },
+  wizmore: t => { S.wizMore = { ...(S.wizMore || {}), [t.dataset.v]: !(S.wizMore || {})[t.dataset.v] }; const y = window.scrollY; render(); window.scrollTo(0, y); },
+  wzaskx: () => { S.inlineQ = null; S.pendingTpl = null; const y = window.scrollY; render(); window.scrollTo(0, y); },
   togglestep: t => { const n = +t.dataset.n; S.step = S.step === n ? 0 : n; render(); },
   nextstep: t => { S.step = +t.dataset.n; render(); const el = document.querySelectorAll(".step-card")[S.step - 1]; el?.scrollIntoView({ behavior: "smooth", block: "start" }); },
   btab: t => { S.btab = t.dataset.v; S.btabCenter = true; S.bchipScroll = 0; render(); },
   baustein: t => {
     const f = S.form, v = t.dataset.v;
     if (hatZeile(f, v)) lageRemove(f, v);
-    else if (tplHasVars(v)) { S.pendingReplace = null; openTpl(v, t.dataset.q); return; }
+    else if (tplHasVars(v)) {
+      S.pendingReplace = null;
+      if (S.wiz && S.view === "neu") { S.pendingTpl = v; S.inlineQ = { q: t.dataset.q || tplFind(v).q }; const y = window.scrollY; render(); window.scrollTo(0, y); setTimeout(() => { $("#wzask")?.scrollIntoView({ behavior: "smooth", block: "center" }); if (!v.includes("[#]")) $("#qfree")?.focus(); }, 30); return; }
+      openTpl(v, t.dataset.q); return;
+    }
     else lageAdd(f, v);
     saveDraft(); askNew();
     const y = window.scrollY; render(); window.scrollTo(0, y);
@@ -1701,7 +1820,7 @@ const ACT = {
     else if (o.act === "qset") f[o.k] = o.v;
     else if (o.act === "qtab") { S.btab = o.v; S.btabCenter = true; S.bchipScroll = 0; }
     else if (o.act === "qerk") { erkModal(); render(); return; }
-    else if (o.act === "qsec") { S.secOpen = o.v; }
+    else if (o.act === "qsec") { S.secOpen = o.v; S.wpId = o.v + "-0"; }
     saveDraft(); askNew();
     const y = window.scrollY; render(); window.scrollTo(0, y);
   },
